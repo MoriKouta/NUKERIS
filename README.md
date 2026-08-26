@@ -2,6 +2,9 @@
 
 A Nuke-native falling-block puzzle game designed for quick breaks while compositing.
 
+<img width="1173" height="1729" alt="image" src="https://github.com/user-attachments/assets/504ff70a-c21d-4f23-87ed-9b6c0e22f778" />
+
+
 NUKERIS runs directly inside Foundry Nuke as a dockable PySide6 panel. Its visual language is inspired by Nuke's Node Graph and Properties panels: pieces are drawn as connected Nuke-style nodes, with familiar node colors, wires, and an optional Node Graph grid.
 
 ## Features
