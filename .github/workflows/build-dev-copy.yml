@@ -1,0 +1,39 @@
+name: Build NUKERIS dev copy
+
+on:
+  push:
+    branches:
+      - compat/nuke12-17
+    paths:
+      - .github/workflows/build-dev-copy.yml
+
+permissions:
+  contents: write
+
+jobs:
+  build-dev:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: compat/nuke12-17
+      - name: Create dev build
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          src = Path('nukeris.py').read_text(encoding='utf-8')
+          src = src.replace('NUKERIS v1.1.0', 'NUKERIS v1.1.0-dev.1', 1)
+          src = src.replace('__version__ = "1.1.0"', '__version__ = "1.1.0-dev.1"', 1)
+          src = src.replace('in this release build.', 'in this development build.', 1)
+          Path('nukeris_dev_1_1_001.py').write_text(src, encoding='utf-8')
+          PY
+          python -m py_compile nukeris_dev_1_1_001.py
+      - name: Commit dev build
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add nukeris_dev_1_1_001.py
+          git commit -m "Add NUKERIS dev 1.1.001" || exit 0
+          git push origin HEAD:compat/nuke12-17
