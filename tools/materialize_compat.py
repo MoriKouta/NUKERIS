@@ -1,7 +1,6 @@
 from __future__ import print_function
 
 import hashlib
-import os
 import zlib
 
 PATH = "nukeris.py"
@@ -17,23 +16,24 @@ def main():
     with open(PATH, "rb") as handle:
         raw = handle.read()
 
+    print("raw bytes:", len(raw), repr(raw[:16]))
+    print("raw blob:", git_blob_sha(raw))
+
     try:
         source = zlib.decompress(raw)
-        changed = True
-    except zlib.error:
-        source = raw
-        changed = False
+        print("zlib decompressed bytes:", len(source))
+    except zlib.error as exc:
+        print("zlib error:", repr(exc))
+        raise
 
     sha = git_blob_sha(source)
+    print("materialized blob:", sha)
     if sha != EXPECTED_BLOB:
         raise RuntimeError("Unexpected nukeris.py blob after materialization: %s" % sha)
 
-    if changed:
-        with open(PATH, "wb") as handle:
-            handle.write(source)
-        print("Materialized %s (%d bytes, blob %s)" % (PATH, len(source), sha))
-    else:
-        print("%s is already materialized (blob %s)" % (PATH, sha))
+    with open(PATH, "wb") as handle:
+        handle.write(source)
+    print("Materialized %s (%d bytes, blob %s)" % (PATH, len(source), sha))
 
 
 if __name__ == "__main__":
