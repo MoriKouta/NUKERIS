@@ -4,8 +4,9 @@ A Nuke-native falling-block puzzle game designed for quick breaks while composit
 
 <img width="850" alt="NUKERIS" src="https://github.com/user-attachments/assets/504ff70a-c21d-4f23-87ed-9b6c0e22f778" />
 
+NUKERIS runs directly inside Foundry Nuke as a dockable Qt panel. Its visual language is inspired by Nuke's Node Graph and Properties panels: pieces are drawn as connected Nuke-style nodes, with familiar node colors, wires, and an optional Node Graph grid.
 
-NUKERIS runs directly inside Foundry Nuke as a dockable PySide6 panel. Its visual language is inspired by Nuke's Node Graph and Properties panels: pieces are drawn as connected Nuke-style nodes, with familiar node colors, wires, and an optional Node Graph grid.
+The same `nukeris.py` automatically uses **PySide2** on older Nuke versions and **PySide6** on newer versions, so the installation stays identical across supported releases.
 
 ## Features
 
@@ -23,6 +24,7 @@ NUKERIS runs directly inside Foundry Nuke as a dockable PySide6 panel. Its visua
 - Session timer
 - Automatic pause when input focus is lost
 - Keyboard handling designed to avoid conflicts with Nuke shortcuts
+- Single-file PySide2 / PySide6 compatibility
 
 ## Controls
 
@@ -95,10 +97,17 @@ The game receives keyboard input only while its panel has focus.
 
 ## Compatibility
 
-- Foundry Nuke / NukeX 16.0+
-- PySide6
+| Nuke | Python | Qt binding |
+| --- | --- | --- |
+| 12.x | Python 2.7 | PySide2 |
+| 13.x - 15.x | Python 3 | PySide2 |
+| 16.x - 17.x | Python 3 | PySide6 |
+
+- Foundry Nuke / NukeX 12.0 - 17.x
 - Windows
 - Linux
+
+Nuke 13 and later use Python 3. Nuke 12.x is the legacy Python 2.7 target.
 
 ## License
 
@@ -108,5 +117,5 @@ MIT License. See [LICENSE](LICENSE).
 
 Kota Mori
 
-NUKERIS v1.0.0  
+NUKERIS v1.1.0  
 © 2026 Kota Mori
