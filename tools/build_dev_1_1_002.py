@@ -88,6 +88,8 @@ if old_init not in text:
     raise RuntimeError("Could not find GameEngine init block")
 text = text.replace(old_init, new_init, 1)
 
+# Persist at the same safe checkpoints where v1.1.0-dev.1 already updated BEST:
+# piece lock and game-over paths. This avoids disk writes on every soft-drop keypress.
 best_line = "            self.best_score = max(self.best_score, self.score)"
 count = text.count(best_line)
 if count != 2:
@@ -99,18 +101,6 @@ count = text.count(best_line_8)
 if count != 1:
     raise RuntimeError("Expected 1 best-score update, found %d" % count)
 text = text.replace(best_line_8, "        self._update_best_score()", 1)
-
-soft_old = '''        if self.move(0, 1):\n            self.score += 1\n            return True\n'''
-soft_new = '''        if self.move(0, 1):\n            self.score += 1\n            self._update_best_score()\n            return True\n'''
-if soft_old not in text:
-    raise RuntimeError("Could not find soft-drop score block")
-text = text.replace(soft_old, soft_new, 1)
-
-hard_old = '''        self.score += distance * 2\n        self.lock_piece()\n'''
-hard_new = '''        self.score += distance * 2\n        self._update_best_score()\n        self.lock_piece()\n'''
-if hard_old not in text:
-    raise RuntimeError("Could not find hard-drop score block")
-text = text.replace(hard_old, hard_new, 1)
 
 TARGET.write_text(text, encoding="utf-8")
 print("Wrote %s (%d bytes)" % (TARGET, TARGET.stat().st_size))
