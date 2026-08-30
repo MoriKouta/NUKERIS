@@ -1,0 +1,46 @@
+name: Materialize compatibility source
+
+on:
+  push:
+    branches:
+      - compat/nuke12-17
+    paths:
+      - tools/materialize_compat.py
+      - .github/workflows/materialize-compat.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout compatibility branch
+        uses: actions/checkout@v4
+        with:
+          ref: compat/nuke12-17
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Materialize source
+        run: python tools/materialize_compat.py
+
+      - name: Validate Python 3 syntax
+        run: python -m py_compile nukeris.py
+
+      - name: Commit materialized source
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add nukeris.py
+          if git diff --cached --quiet; then
+            echo "No source change required."
+          else
+            git commit -m "Materialize Nuke 12-17 compatible source"
+            git push origin HEAD:compat/nuke12-17
+          fi
