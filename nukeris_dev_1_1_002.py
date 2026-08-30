@@ -381,7 +381,6 @@ class GameEngine(object):
     def soft_drop(self) :
         if self.move(0, 1):
             self.score += 1
-            self._update_best_score()
             return True
         self.lock_piece()
         return False
@@ -397,7 +396,6 @@ class GameEngine(object):
         while self.move(0, 1):
             distance += 1
         self.score += distance * 2
-        self._update_best_score()
         self.lock_piece()
         return distance
 
