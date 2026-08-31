@@ -1,5 +1,6 @@
 from __future__ import print_function
 
+import re
 from pathlib import Path
 
 SOURCE = Path("nukeris_dev_1_1_002.py")
@@ -54,13 +55,10 @@ text = text.replace(
 
 text = text.replace('sub = "GAME ERROR — R TO RESTART"', 'sub = "GAME ERROR — USE NEW GAME"', 1)
 
-residual = []
-for line_number, line in enumerate(text.splitlines(), 1):
-    if "QC.Key_P" in line or "QC.Key_R" in line:
-        residual.append((line_number, line))
-        print("RESIDUAL %d: %s" % (line_number, line))
-if residual:
-    raise RuntimeError("Release still contains P/R shortcut references")
+shortcut_pattern = re.compile(r"QC\.Key_(?:P|R)(?![A-Za-z_])")
+match = shortcut_pattern.search(text)
+if match:
+    raise RuntimeError("Release still contains P/R shortcut reference near offset %d" % match.start())
 
 TARGET.write_text(text, encoding="utf-8")
 print("Wrote %s (%d bytes)" % (TARGET, TARGET.stat().st_size))
