@@ -22,6 +22,7 @@ The same `nukeris.py` automatically uses **PySide2** on older Nuke versions and 
 - Combo scoring
 - Line-clear effects
 - Session timer
+- Persistent best score
 - Automatic pause when input focus is lost
 - Keyboard handling designed to avoid conflicts with Nuke shortcuts
 - Single-file PySide2 / PySide6 compatibility
@@ -35,8 +36,6 @@ The same `nukeris.py` automatically uses **PySide2** on older Nuke versions and 
 | Q / E | Rotate |
 | C | Hold |
 | Space / W | Hard Drop |
-| P | Pause |
-| R | New Game |
 | Esc | Pause / Release Input |
 
 Keyboard controls are active only while the NUKERIS panel owns input focus.
@@ -81,6 +80,12 @@ Then keep the same line in `menu.py`:
 import nukeris
 ```
 
+## Best score
+
+NUKERIS stores the best score in `nukeris_settings.json` next to the loaded `nukeris.py` file. The settings file is created automatically when a new best score is recorded.
+
+If the settings file is missing, invalid, or not writable, NUKERIS continues running and falls back safely without affecting the current Nuke script.
+
 ## Safety
 
 NUKERIS is intentionally isolated from your comp. It does not:
@@ -92,6 +97,8 @@ NUKERIS is intentionally isolated from your comp. It does not:
 - modify the Undo stack
 - write data into the current `.nk` script
 - register global keyboard shortcuts
+
+The only local file NUKERIS writes is `nukeris_settings.json` beside the loaded module, used to persist the best score.
 
 The game receives keyboard input only while its panel has focus.
 
