@@ -4,8 +4,9 @@ A Nuke-native falling-block puzzle game designed for quick breaks while composit
 
 <img width="850" alt="NUKERIS" src="https://github.com/user-attachments/assets/504ff70a-c21d-4f23-87ed-9b6c0e22f778" />
 
+NUKERIS runs directly inside Foundry Nuke as a dockable Qt panel. Its visual language is inspired by Nuke's Node Graph and Properties panels: pieces are drawn as connected Nuke-style nodes, with familiar node colors, wires, and an optional Node Graph grid.
 
-NUKERIS runs directly inside Foundry Nuke as a dockable PySide6 panel. Its visual language is inspired by Nuke's Node Graph and Properties panels: pieces are drawn as connected Nuke-style nodes, with familiar node colors, wires, and an optional Node Graph grid.
+The same `nukeris.py` automatically uses **PySide2** on older Nuke versions and **PySide6** on newer versions, so the installation stays identical across supported releases.
 
 ## Features
 
@@ -21,8 +22,10 @@ NUKERIS runs directly inside Foundry Nuke as a dockable PySide6 panel. Its visua
 - Combo scoring
 - Line-clear effects
 - Session timer
+- Persistent best score
 - Automatic pause when input focus is lost
 - Keyboard handling designed to avoid conflicts with Nuke shortcuts
+- Single-file PySide2 / PySide6 compatibility
 
 ## Controls
 
@@ -33,8 +36,6 @@ NUKERIS runs directly inside Foundry Nuke as a dockable PySide6 panel. Its visua
 | Q / E | Rotate |
 | C | Hold |
 | Space / W | Hard Drop |
-| P | Pause |
-| R | New Game |
 | Esc | Pause / Release Input |
 
 Keyboard controls are active only while the NUKERIS panel owns input focus.
@@ -79,6 +80,12 @@ Then keep the same line in `menu.py`:
 import nukeris
 ```
 
+## Best score
+
+NUKERIS stores the best score in `nukeris_settings.json` next to the loaded `nukeris.py` file. The settings file is created automatically when a new best score is recorded.
+
+If the settings file is missing, invalid, or not writable, NUKERIS continues running and falls back safely without affecting the current Nuke script.
+
 ## Safety
 
 NUKERIS is intentionally isolated from your comp. It does not:
@@ -91,14 +98,23 @@ NUKERIS is intentionally isolated from your comp. It does not:
 - write data into the current `.nk` script
 - register global keyboard shortcuts
 
+The only local file NUKERIS writes is `nukeris_settings.json` beside the loaded module, used to persist the best score.
+
 The game receives keyboard input only while its panel has focus.
 
 ## Compatibility
 
-- Foundry Nuke / NukeX 16.0+
-- PySide6
+| Nuke | Python | Qt binding |
+| --- | --- | --- |
+| 12.x | Python 2.7 | PySide2 |
+| 13.x - 15.x | Python 3 | PySide2 |
+| 16.x - 17.x | Python 3 | PySide6 |
+
+- Foundry Nuke / NukeX 12.0 - 17.x
 - Windows
 - Linux
+
+Nuke 13 and later use Python 3. Nuke 12.x is the legacy Python 2.7 target.
 
 ## License
 
@@ -108,5 +124,5 @@ MIT License. See [LICENSE](LICENSE).
 
 Kota Mori
 
-NUKERIS v1.0.0  
+NUKERIS v1.1.0  
 © 2026 Kota Mori

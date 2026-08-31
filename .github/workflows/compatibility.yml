@@ -1,0 +1,38 @@
+name: Compatibility syntax checks
+
+on:
+  push:
+    branches:
+      - main
+      - "compat/**"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python3-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile release and dev builds with Python 3
+        shell: bash
+        run: |
+          for file in nukeris.py nukeris_dev_*.py; do
+            [ -e "$file" ] || continue
+            echo "Checking $file"
+            python -m py_compile "$file"
+          done
+
+  python2-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile release and dev builds with Python 2.7
+        run: >-
+          docker run --rm -v "$PWD:/work" -w /work python:2.7
+          sh -lc 'for file in nukeris.py nukeris_dev_*.py; do [ -e "$file" ] || continue; echo "Checking $file"; python -m py_compile "$file" || exit 1; done'

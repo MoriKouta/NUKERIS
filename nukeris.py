@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-NUKERIS v1.0.0
-A small, isolated compositing-themed tetromino game for Foundry Nuke 16+.
+NUKERIS v1.1.0
+A small, isolated compositing-themed tetromino game for Foundry Nuke 12+.
 
 Safety design:
 - Does not read or modify the current .nk script.
 - Does not create/select/change nodes, viewers, frames, knobs, or undo state.
 - No Nuke callbacks, no threads, no global event filters, no global shortcuts.
 - Uses Qt ShortcutOverride only on this focused widget so Nuke single-key actions do not fire while playing.
-- No disk writes / settings files in this release build.
+- Writes only nukeris_settings.json next to this script to persist the best score.
 - The game timer stops while paused or hidden.
 - Keyboard input is handled only while this widget owns focus.
 
@@ -21,22 +21,92 @@ Install:
 3. Restart Nuke, then open Pane > NUKERIS.
 
 No init.py edit is required.
+
+Compatibility:
+- Nuke 12.x: Python 2.7 + PySide2
+- Nuke 13.x-15.x: Python 3 + PySide2
+- Nuke 16.x-17.x: Python 3 + PySide6
 """
 
-from __future__ import annotations
+from __future__ import division, print_function, unicode_literals
 
+import json
 import math
+import os
 import random
 import time
 import traceback
 from collections import deque
-from dataclasses import dataclass
-from typing import Deque, Dict, List, Optional, Sequence, Tuple
 
-from PySide6 import QtCore, QtGui, QtWidgets
+try:
+    from PySide6 import QtCore, QtGui, QtWidgets
+    QT_BINDING = "PySide6"
+except ImportError:
+    from PySide2 import QtCore, QtGui, QtWidgets
+    QT_BINDING = "PySide2"
 
 
-__version__ = "1.0.0"
+def _enum_value(root, group_name, value_name):
+    """Return a scoped Qt6 enum or its legacy Qt5 equivalent."""
+    group = getattr(root, group_name, None)
+    if group is not None and hasattr(group, value_name):
+        return getattr(group, value_name)
+    return getattr(root, value_name)
+
+
+class _QtCompat(object):
+    pass
+
+
+QC = _QtCompat()
+# QtCore.Qt enums
+QC.StrongFocus = _enum_value(QtCore.Qt, "FocusPolicy", "StrongFocus")
+QC.NoFocus = _enum_value(QtCore.Qt, "FocusPolicy", "NoFocus")
+QC.MouseFocusReason = _enum_value(QtCore.Qt, "FocusReason", "MouseFocusReason")
+QC.PointingHandCursor = _enum_value(QtCore.Qt, "CursorShape", "PointingHandCursor")
+QC.PreciseTimer = _enum_value(QtCore.Qt, "TimerType", "PreciseTimer")
+QC.LeftButton = _enum_value(QtCore.Qt, "MouseButton", "LeftButton")
+QC.ControlModifier = _enum_value(QtCore.Qt, "KeyboardModifier", "ControlModifier")
+QC.AltModifier = _enum_value(QtCore.Qt, "KeyboardModifier", "AltModifier")
+QC.MetaModifier = _enum_value(QtCore.Qt, "KeyboardModifier", "MetaModifier")
+QC.NoPen = _enum_value(QtCore.Qt, "PenStyle", "NoPen")
+QC.DashLine = _enum_value(QtCore.Qt, "PenStyle", "DashLine")
+QC.DotLine = _enum_value(QtCore.Qt, "PenStyle", "DotLine")
+QC.NoBrush = _enum_value(QtCore.Qt, "BrushStyle", "NoBrush")
+QC.FlatCap = _enum_value(QtCore.Qt, "PenCapStyle", "FlatCap")
+QC.AlignCenter = _enum_value(QtCore.Qt, "AlignmentFlag", "AlignCenter")
+QC.AlignLeft = _enum_value(QtCore.Qt, "AlignmentFlag", "AlignLeft")
+QC.AlignRight = _enum_value(QtCore.Qt, "AlignmentFlag", "AlignRight")
+QC.AlignVCenter = _enum_value(QtCore.Qt, "AlignmentFlag", "AlignVCenter")
+QC.ElideRight = _enum_value(QtCore.Qt, "TextElideMode", "ElideRight")
+for _key_name in (
+    "Key_A", "Key_C", "Key_D", "Key_Down", "Key_E", "Key_Enter",
+    "Key_Escape", "Key_Left", "Key_Q", "Key_Return",
+    "Key_Right", "Key_S", "Key_Space", "Key_Up", "Key_W"
+):
+    setattr(QC, _key_name, _enum_value(QtCore.Qt, "Key", _key_name))
+
+# QEvent enums
+QC.PaletteChange = _enum_value(QtCore.QEvent, "Type", "PaletteChange")
+QC.ApplicationPaletteChange = _enum_value(QtCore.QEvent, "Type", "ApplicationPaletteChange")
+QC.ShortcutOverride = _enum_value(QtCore.QEvent, "Type", "ShortcutOverride")
+
+# QPalette roles
+for _role in ("Window", "WindowText", "ButtonText", "Highlight", "Base", "Button", "Shadow", "Light"):
+    setattr(QC, "Palette" + _role, _enum_value(QtGui.QPalette, "ColorRole", _role))
+
+# QFont weights and QPainter render hint
+QC.FontNormal = _enum_value(QtGui.QFont, "Weight", "Normal")
+QC.FontMedium = _enum_value(QtGui.QFont, "Weight", "Medium")
+QC.FontDemiBold = _enum_value(QtGui.QFont, "Weight", "DemiBold")
+QC.Antialiasing = _enum_value(QtGui.QPainter, "RenderHint", "Antialiasing")
+
+# Python 2.7 has no time.monotonic(). Wall-clock fallback is sufficient because
+# every frame delta is clamped and timer state is reset on pause/resume.
+_monotonic = getattr(time, "monotonic", time.time)
+
+
+__version__ = "1.1.0"
 PANEL_TITLE = "NUKERIS"
 PANEL_ID = "com.mori.nukeris.panel"
 
@@ -45,9 +115,65 @@ BOARD_H = 20
 NEXT_COUNT = 5
 CLEAR_FX_SECONDS = 0.28
 
+SETTINGS_FILENAME = "nukeris_settings.json"
+
+
+def _settings_path():
+    """Return the settings file beside this Python module."""
+    try:
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)), SETTINGS_FILENAME)
+    except Exception:
+        return None
+
+
+def _load_best_score():
+    """Load a persisted best score. Invalid/missing settings safely fall back to 0."""
+    path = _settings_path()
+    if not path:
+        return 0
+    try:
+        with open(path, "r") as handle:
+            data = json.load(handle)
+        value = int(data.get("best_score", 0))
+        return max(0, value)
+    except Exception:
+        return 0
+
+
+def _save_best_score(best_score):
+    """Persist the best score without ever allowing an I/O error to affect Nuke."""
+    path = _settings_path()
+    if not path:
+        return False
+
+    temp_path = path + ".tmp"
+    try:
+        with open(temp_path, "w") as handle:
+            json.dump(
+                {"best_score": max(0, int(best_score))},
+                handle,
+                indent=2,
+                sort_keys=True,
+            )
+            handle.write("\n")
+
+        # os.replace() is unavailable in Python 2.7, so use a compatible
+        # remove+rename sequence. The temporary file avoids partial JSON writes.
+        if os.path.exists(path):
+            os.remove(path)
+        os.rename(temp_path, path)
+        return True
+    except Exception:
+        try:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+        except Exception:
+            pass
+        return False
+
 # Representative Nuke node-class colors. These are intentionally close to the
 # familiar Node Graph palette rather than conventional Tetris colors.
-NODE_STYLES: Dict[str, Dict[str, str]] = {
+NODE_STYLES = {
     "I": {"label": "Read",      "color": "#A9ADB0"},
     "O": {"label": "Merge",     "color": "#5366B3"},
     "T": {"label": "Transform", "color": "#9B6B99"},
@@ -63,7 +189,7 @@ NUKE_GRAPH_BG = "#323232"
 NUKE_WIRE = "#111111"
 
 # SRS-compatible piece states in a 4x4 local grid.
-PIECE_CELLS: Dict[str, Tuple[Tuple[Tuple[int, int], ...], ...]] = {
+PIECE_CELLS = {
     "I": (
         ((0, 1), (1, 1), (2, 1), (3, 1)),
         ((2, 0), (2, 1), (2, 2), (2, 3)),
@@ -109,7 +235,7 @@ PIECE_CELLS: Dict[str, Tuple[Tuple[Tuple[int, int], ...], ...]] = {
 }
 
 # SRS kick data converted to a screen coordinate system where +Y is downward.
-JLSTZ_KICKS: Dict[Tuple[int, int], Tuple[Tuple[int, int], ...]] = {
+JLSTZ_KICKS = {
     (0, 1): ((0, 0), (-1, 0), (-1, -1), (0, 2), (-1, 2)),
     (1, 0): ((0, 0), (1, 0), (1, 1), (0, -2), (1, -2)),
     (1, 2): ((0, 0), (1, 0), (1, 1), (0, -2), (1, -2)),
@@ -120,7 +246,7 @@ JLSTZ_KICKS: Dict[Tuple[int, int], Tuple[Tuple[int, int], ...]] = {
     (0, 3): ((0, 0), (1, 0), (1, -1), (0, 2), (1, 2)),
 }
 
-I_KICKS: Dict[Tuple[int, int], Tuple[Tuple[int, int], ...]] = {
+I_KICKS = {
     (0, 1): ((0, 0), (-2, 0), (1, 0), (-2, 1), (1, -2)),
     (1, 0): ((0, 0), (2, 0), (-1, 0), (2, -1), (-1, 2)),
     (1, 2): ((0, 0), (-1, 0), (2, 0), (-1, -2), (2, 1)),
@@ -132,41 +258,47 @@ I_KICKS: Dict[Tuple[int, int], Tuple[Tuple[int, int], ...]] = {
 }
 
 
-@dataclass
-class Tetromino:
-    kind: str
-    x: int = 3
-    y: int = -1
-    rotation: int = 0
+class Tetromino(object):
+    def __init__(self, kind, x=3, y=-1, rotation=0):
+        self.kind = kind
+        self.x = x
+        self.y = y
+        self.rotation = rotation
 
-    def cells(self, x: Optional[int] = None, y: Optional[int] = None,
-              rotation: Optional[int] = None) -> List[Tuple[int, int]]:
+    def cells(self, x=None, y=None, rotation=None):
         px = self.x if x is None else x
         py = self.y if y is None else y
         pr = self.rotation if rotation is None else rotation % 4
         return [(px + cx, py + cy) for cx, cy in PIECE_CELLS[self.kind][pr]]
 
 
-@dataclass(frozen=True)
-class PlacedCell:
-    kind: str
-    group_id: int
+class PlacedCell(object):
+    __slots__ = ("kind", "group_id")
+
+    def __init__(self, kind, group_id):
+        self.kind = kind
+        self.group_id = group_id
 
 
-class GameEngine:
+class GameEngine(object):
     """Pure-Python game state. Intentionally has no Nuke or Qt dependency."""
 
-    def __init__(self) -> None:
-        self.best_score = 0
+    def __init__(self) :
+        self.best_score = _load_best_score()
         self.reset()
 
-    def reset(self) -> None:
-        self.board: List[List[Optional[PlacedCell]]] = [
+    def _update_best_score(self) :
+        if self.score > self.best_score:
+            self.best_score = self.score
+            _save_best_score(self.best_score)
+
+    def reset(self) :
+        self.board = [
             [None for _ in range(BOARD_W)] for _ in range(BOARD_H)
         ]
-        self.queue: Deque[str] = deque()
-        self.active: Optional[Tetromino] = None
-        self.hold_kind: Optional[str] = None
+        self.queue = deque()
+        self.active = None
+        self.hold_kind = None
         self.hold_used = False
         self.score = 0
         self.lines = 0
@@ -174,27 +306,27 @@ class GameEngine:
         self.combo = -1
         self.game_over = False
         self.last_clear = 0
-        self.last_clear_rows: List[int] = []
+        self.last_clear_rows = []
         self.clear_event_id = 0
         self._next_group_id = 1
         self._fill_queue()
         self._spawn()
 
     @property
-    def fall_interval_ms(self) -> int:
+    def fall_interval_ms(self) :
         return max(70, int(760 * (0.82 ** (self.level - 1))))
 
-    def _fill_queue(self) -> None:
+    def _fill_queue(self) :
         while len(self.queue) < 14:
             bag = list(PIECE_CELLS.keys())
             random.shuffle(bag)
             self.queue.extend(bag)
 
-    def next_pieces(self, count: int = NEXT_COUNT) -> List[str]:
+    def next_pieces(self, count = NEXT_COUNT) :
         self._fill_queue()
         return list(self.queue)[:count]
 
-    def _spawn(self, forced_kind: Optional[str] = None) -> None:
+    def _spawn(self, forced_kind = None) :
         if forced_kind is None:
             self._fill_queue()
             kind = self.queue.popleft()
@@ -206,9 +338,9 @@ class GameEngine:
         self.hold_used = False
         if not self._valid(self.active.cells()):
             self.game_over = True
-            self.best_score = max(self.best_score, self.score)
+            self._update_best_score()
 
-    def _valid(self, cells: Sequence[Tuple[int, int]]) -> bool:
+    def _valid(self, cells) :
         for x, y in cells:
             if x < 0 or x >= BOARD_W or y >= BOARD_H:
                 return False
@@ -216,7 +348,7 @@ class GameEngine:
                 return False
         return True
 
-    def move(self, dx: int, dy: int) -> bool:
+    def move(self, dx, dy) :
         if self.game_over or self.active is None:
             return False
         nx = self.active.x + dx
@@ -227,7 +359,7 @@ class GameEngine:
             return True
         return False
 
-    def rotate(self, direction: int) -> bool:
+    def rotate(self, direction) :
         if self.game_over or self.active is None:
             return False
         piece = self.active
@@ -246,18 +378,18 @@ class GameEngine:
                 return True
         return False
 
-    def soft_drop(self) -> bool:
+    def soft_drop(self) :
         if self.move(0, 1):
             self.score += 1
             return True
         self.lock_piece()
         return False
 
-    def gravity_step(self) -> None:
+    def gravity_step(self) :
         if not self.move(0, 1):
             self.lock_piece()
 
-    def hard_drop(self) -> int:
+    def hard_drop(self) :
         if self.game_over or self.active is None:
             return 0
         distance = 0
@@ -267,7 +399,7 @@ class GameEngine:
         self.lock_piece()
         return distance
 
-    def ghost_y(self) -> Optional[int]:
+    def ghost_y(self) :
         if self.active is None:
             return None
         gy = self.active.y
@@ -275,7 +407,7 @@ class GameEngine:
             gy += 1
         return gy
 
-    def hold(self) -> bool:
+    def hold(self) :
         if self.game_over or self.active is None or self.hold_used:
             return False
 
@@ -290,14 +422,14 @@ class GameEngine:
         self.hold_used = True
         return True
 
-    def lock_piece(self) -> None:
+    def lock_piece(self) :
         if self.game_over or self.active is None:
             return
 
         cells = self.active.cells()
         if any(y < 0 for _, y in cells):
             self.game_over = True
-            self.best_score = max(self.best_score, self.score)
+            self._update_best_score()
             return
 
         group_id = self._next_group_id
@@ -308,10 +440,10 @@ class GameEngine:
         cleared = self._clear_lines()
         self.last_clear = cleared
         self._score_clear(cleared)
-        self.best_score = max(self.best_score, self.score)
+        self._update_best_score()
         self._spawn()
 
-    def _clear_lines(self) -> int:
+    def _clear_lines(self) :
         full_rows = [i for i, row in enumerate(self.board) if all(cell is not None for cell in row)]
         self.last_clear_rows = full_rows
         cleared = len(full_rows)
@@ -328,7 +460,7 @@ class GameEngine:
         self.level = 1 + self.lines // 10
         return cleared
 
-    def _score_clear(self, cleared: int) -> None:
+    def _score_clear(self, cleared) :
         table = {0: 0, 1: 100, 2: 300, 3: 500, 4: 800}
         if cleared > 0:
             self.combo += 1
@@ -342,10 +474,10 @@ class GameEngine:
 class NukerisPanel(QtWidgets.QWidget):
     """Dockable Qt game widget. No Nuke script access is performed here."""
 
-    def __init__(self, parent=None) -> None:
-        super().__init__(parent)
+    def __init__(self, parent=None) :
+        QtWidgets.QWidget.__init__(self, parent)
         self.setObjectName("NukerisPanel")
-        self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
+        self.setFocusPolicy(QC.StrongFocus)
         self.setMouseTracking(True)
         self.setMinimumSize(360, 520)
 
@@ -355,22 +487,22 @@ class NukerisPanel(QtWidgets.QWidget):
         self.input_active = False
         self.error_text = ""
 
-        self._last_tick = time.monotonic()
+        self._last_tick = _monotonic()
         self._fall_accum_ms = 0.0
         self._active_seconds = 0.0
         self._seen_clear_event = 0
         self._clear_fx_started = 0.0
-        self._clear_fx_rows: List[int] = []
+        self._clear_fx_rows = []
 
         self._timer = QtCore.QTimer(self)
-        self._timer.setTimerType(QtCore.Qt.TimerType.PreciseTimer)
+        self._timer.setTimerType(QC.PreciseTimer)
         self._timer.setInterval(33)  # ~30 fps maximum while playing.
         self._timer.timeout.connect(self._on_timer)
 
         self._new_game_button = QtWidgets.QPushButton("NEW GAME", self)
         self._new_game_button.setObjectName("NukerisNewGame")
-        self._new_game_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
-        self._new_game_button.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+        self._new_game_button.setFocusPolicy(QC.NoFocus)
+        self._new_game_button.setCursor(QC.PointingHandCursor)
         self._new_game_button.clicked.connect(self._new_game_from_button)
 
         # Real UI option: unlike the decorative Properties-inspired chrome, this is
@@ -378,8 +510,8 @@ class NukerisPanel(QtWidgets.QWidget):
         self._grid_checkbox = QtWidgets.QCheckBox("Node Graph grid", self)
         self._grid_checkbox.setObjectName("NukerisNodeGraphGrid")
         self._grid_checkbox.setChecked(False)
-        self._grid_checkbox.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
-        self._grid_checkbox.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+        self._grid_checkbox.setFocusPolicy(QC.NoFocus)
+        self._grid_checkbox.setCursor(QC.PointingHandCursor)
         self._grid_checkbox.setToolTip(
             "Show a Nuke-style dotted grid aligned exactly to the one-cell movement step."
         )
@@ -390,25 +522,25 @@ class NukerisPanel(QtWidgets.QWidget):
     # ---------- Palette / Nuke look ----------
 
     @staticmethod
-    def _mix(a: QtGui.QColor, b: QtGui.QColor, t: float) -> QtGui.QColor:
+    def _mix(a, b, t) :
         t = max(0.0, min(1.0, t))
         return QtGui.QColor(
-            round(a.red() * (1.0 - t) + b.red() * t),
-            round(a.green() * (1.0 - t) + b.green() * t),
-            round(a.blue() * (1.0 - t) + b.blue() * t),
-            round(a.alpha() * (1.0 - t) + b.alpha() * t),
+            int(round(a.red() * (1.0 - t) + b.red() * t)),
+            int(round(a.green() * (1.0 - t) + b.green() * t)),
+            int(round(a.blue() * (1.0 - t) + b.blue() * t)),
+            int(round(a.alpha() * (1.0 - t) + b.alpha() * t)),
         )
 
-    def _theme(self) -> Dict[str, QtGui.QColor]:
+    def _theme(self) :
         pal = QtWidgets.QApplication.palette()
-        window = pal.color(QtGui.QPalette.ColorRole.Window)
-        text = pal.color(QtGui.QPalette.ColorRole.WindowText)
-        button_text = pal.color(QtGui.QPalette.ColorRole.ButtonText)
-        highlight = pal.color(QtGui.QPalette.ColorRole.Highlight)
-        base = pal.color(QtGui.QPalette.ColorRole.Base)
-        button = pal.color(QtGui.QPalette.ColorRole.Button)
-        shadow = pal.color(QtGui.QPalette.ColorRole.Shadow)
-        light = pal.color(QtGui.QPalette.ColorRole.Light)
+        window = pal.color(QC.PaletteWindow)
+        text = pal.color(QC.PaletteWindowText)
+        button_text = pal.color(QC.PaletteButtonText)
+        highlight = pal.color(QC.PaletteHighlight)
+        base = pal.color(QC.PaletteBase)
+        button = pal.color(QC.PaletteButton)
+        shadow = pal.color(QC.PaletteShadow)
+        light = pal.color(QC.PaletteLight)
 
         graph = QtGui.QColor(NUKE_GRAPH_BG)
         # Follow Nuke's actual palette roles rather than inventing a separate game skin:
@@ -445,7 +577,7 @@ class NukerisPanel(QtWidgets.QWidget):
             "wire": QtGui.QColor(NUKE_WIRE),
         }
 
-    def _apply_button_style(self) -> None:
+    def _apply_button_style(self) :
         t = self._theme()
         bg = t["raised"].name()
         hover = self._mix(t["raised"], t["text"], 0.08).name()
@@ -453,12 +585,14 @@ class NukerisPanel(QtWidgets.QWidget):
         border = t["border"].name()
         text = t["button_text"].name()
         self._new_game_button.setStyleSheet(
-            "QPushButton#NukerisNewGame {"
-            f"background:{bg}; color:{text}; border:1px solid {border};"
-            "border-radius:1px; padding:3px 10px; font-size:13px; font-weight:600;"
-            "}"
-            f"QPushButton#NukerisNewGame:hover {{ background:{hover}; }}"
-            f"QPushButton#NukerisNewGame:pressed {{ background:{pressed}; }}"
+            ("QPushButton#NukerisNewGame {{"
+             "background:{0}; color:{1}; border:1px solid {2};"
+             "border-radius:1px; padding:3px 10px; font-size:13px; font-weight:600;"
+             "}}"
+             "QPushButton#NukerisNewGame:hover {{ background:{3}; }}"
+             "QPushButton#NukerisNewGame:pressed {{ background:{4}; }}").format(
+                bg, text, border, hover, pressed
+            )
         )
         # Keep Nuke's native checkbox indicator and only enlarge its label.
         if hasattr(self, "_grid_checkbox"):
@@ -466,15 +600,15 @@ class NukerisPanel(QtWidgets.QWidget):
                 "QCheckBox#NukerisNodeGraphGrid { font-size:13px; spacing:7px; }"
             )
 
-    def changeEvent(self, event: QtCore.QEvent) -> None:
+    def changeEvent(self, event) :
         if event.type() in (
-            QtCore.QEvent.Type.PaletteChange,
-            QtCore.QEvent.Type.ApplicationPaletteChange,
+            QC.PaletteChange,
+            QC.ApplicationPaletteChange,
         ):
             self._apply_button_style()
-        super().changeEvent(event)
+        QtWidgets.QWidget.changeEvent(self, event)
 
-    def resizeEvent(self, event: QtGui.QResizeEvent) -> None:
+    def resizeEvent(self, event) :
         w = float(self.width())
         h = float(self.height())
         margin = max(10.0, min(20.0, w * 0.026))
@@ -505,23 +639,23 @@ class NukerisPanel(QtWidgets.QWidget):
         self._grid_checkbox.setGeometry(
             int(round(margin)), int(round(button_y + 35.0)), int(round(checkbox_w)), 24
         )
-        super().resizeEvent(event)
+        QtWidgets.QWidget.resizeEvent(self, event)
 
     # ---------- Lifecycle / safety ----------
 
-    def _start_timer(self) -> None:
-        self._last_tick = time.monotonic()
+    def _start_timer(self) :
+        self._last_tick = _monotonic()
         if self.started and not self.paused and self.isVisible() and not self.engine.game_over:
             if not self._timer.isActive():
                 self._timer.start()
 
-    def _stop_timer(self) -> None:
+    def _stop_timer(self) :
         if self._timer.isActive():
             self._timer.stop()
-        self._last_tick = time.monotonic()
+        self._last_tick = _monotonic()
         self._fall_accum_ms = 0.0
 
-    def _set_paused(self, paused: bool, release_input: bool = False) -> None:
+    def _set_paused(self, paused, release_input = False) :
         self.paused = paused
         if paused:
             self._stop_timer()
@@ -532,7 +666,7 @@ class NukerisPanel(QtWidgets.QWidget):
             self.input_active = False
         self.update()
 
-    def _new_game(self) -> None:
+    def _new_game(self) :
         best = self.engine.best_score
         self.engine = GameEngine()
         self.engine.best_score = best
@@ -548,51 +682,51 @@ class NukerisPanel(QtWidgets.QWidget):
         self._start_timer()
         self.update()
 
-    def _new_game_from_button(self) -> None:
-        self.setFocus(QtCore.Qt.FocusReason.MouseFocusReason)
+    def _new_game_from_button(self) :
+        self.setFocus(QC.MouseFocusReason)
         self._new_game()
 
-    def _fail_safe_pause(self, exc: BaseException) -> None:
-        self.error_text = f"{type(exc).__name__}: {exc}"
+    def _fail_safe_pause(self, exc) :
+        self.error_text = "{0}: {1}".format(type(exc).__name__, exc)
         self.paused = True
         self.input_active = False
         self._stop_timer()
         traceback.print_exc()
         self.update()
 
-    def _capture_clear_fx(self) -> None:
+    def _capture_clear_fx(self) :
         if self.engine.clear_event_id != self._seen_clear_event:
             self._seen_clear_event = self.engine.clear_event_id
             self._clear_fx_rows = list(self.engine.last_clear_rows)
-            self._clear_fx_started = time.monotonic()
+            self._clear_fx_started = _monotonic()
 
-    def showEvent(self, event: QtGui.QShowEvent) -> None:
-        super().showEvent(event)
+    def showEvent(self, event) :
+        QtWidgets.QWidget.showEvent(self, event)
         self.update()
 
-    def hideEvent(self, event: QtGui.QHideEvent) -> None:
+    def hideEvent(self, event) :
         if self.started and not self.engine.game_over:
             self.paused = True
         self.input_active = False
         self._stop_timer()
-        super().hideEvent(event)
+        QtWidgets.QWidget.hideEvent(self, event)
 
-    def focusInEvent(self, event: QtGui.QFocusEvent) -> None:
+    def focusInEvent(self, event) :
         self.input_active = True
-        super().focusInEvent(event)
+        QtWidgets.QWidget.focusInEvent(self, event)
         self.update()
 
-    def focusOutEvent(self, event: QtGui.QFocusEvent) -> None:
+    def focusOutEvent(self, event) :
         self.input_active = False
         if self.started and not self.engine.game_over:
             self.paused = True
         self._stop_timer()
-        super().focusOutEvent(event)
+        QtWidgets.QWidget.focusOutEvent(self, event)
         self.update()
 
-    def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
-        if event.button() == QtCore.Qt.MouseButton.LeftButton:
-            self.setFocus(QtCore.Qt.FocusReason.MouseFocusReason)
+    def mousePressEvent(self, event) :
+        if event.button() == QC.LeftButton:
+            self.setFocus(QC.MouseFocusReason)
             self.input_active = True
             if not self.started:
                 self._new_game()
@@ -601,40 +735,40 @@ class NukerisPanel(QtWidgets.QWidget):
             self.update()
             event.accept()
             return
-        super().mousePressEvent(event)
+        QtWidgets.QWidget.mousePressEvent(self, event)
 
     # ---------- Keyboard input ----------
 
     _GAME_KEYS = {
-        QtCore.Qt.Key.Key_A, QtCore.Qt.Key.Key_D, QtCore.Qt.Key.Key_S, QtCore.Qt.Key.Key_W,
-        QtCore.Qt.Key.Key_Q, QtCore.Qt.Key.Key_E, QtCore.Qt.Key.Key_C, QtCore.Qt.Key.Key_R,
-        QtCore.Qt.Key.Key_P, QtCore.Qt.Key.Key_Space, QtCore.Qt.Key.Key_Left,
-        QtCore.Qt.Key.Key_Right, QtCore.Qt.Key.Key_Down, QtCore.Qt.Key.Key_Up,
-        QtCore.Qt.Key.Key_Escape, QtCore.Qt.Key.Key_Return, QtCore.Qt.Key.Key_Enter,
+        QC.Key_A, QC.Key_D, QC.Key_S, QC.Key_W,
+        QC.Key_Q, QC.Key_E, QC.Key_C,
+        QC.Key_Space, QC.Key_Left,
+        QC.Key_Right, QC.Key_Down, QC.Key_Up,
+        QC.Key_Escape, QC.Key_Return, QC.Key_Enter,
     }
 
-    def event(self, event: QtCore.QEvent) -> bool:
+    def event(self, event) :
         # Nuke has single-key QAction shortcuts (S, D, etc.) that are resolved before
         # QWidget.keyPressEvent(). ShortcutOverride is Qt's local mechanism for a focused
         # widget to say "I own this key" without installing a global event filter or
         # disabling Nuke actions. Ctrl/Alt/Meta combinations are deliberately left to Nuke.
-        if event.type() == QtCore.QEvent.Type.ShortcutOverride and self.hasFocus():
+        if event.type() == QC.ShortcutOverride and self.hasFocus():
             key_event = event  # QShortcutOverride is delivered as QKeyEvent.
             blocked_mods = (
-                QtCore.Qt.KeyboardModifier.ControlModifier
-                | QtCore.Qt.KeyboardModifier.AltModifier
-                | QtCore.Qt.KeyboardModifier.MetaModifier
+                QC.ControlModifier
+                | QC.AltModifier
+                | QC.MetaModifier
             )
             if not (key_event.modifiers() & blocked_mods) and key_event.key() in self._GAME_KEYS:
                 key_event.accept()
                 return True
-        return super().event(event)
+        return QtWidgets.QWidget.event(self, event)
 
-    def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:
+    def keyPressEvent(self, event) :
         try:
             key = event.key()
 
-            if key == QtCore.Qt.Key.Key_Escape:
+            if key == QC.Key_Escape:
                 if self.started and not self.engine.game_over:
                     self._set_paused(True, release_input=True)
                 self.clearFocus()
@@ -642,15 +776,11 @@ class NukerisPanel(QtWidgets.QWidget):
                 return
 
             if self.error_text:
-                if key == QtCore.Qt.Key.Key_R:
-                    self._new_game()
-                    event.accept()
-                    return
                 event.ignore()
                 return
 
             if not self.started:
-                if key in (QtCore.Qt.Key.Key_Space, QtCore.Qt.Key.Key_Return, QtCore.Qt.Key.Key_Enter):
+                if key in (QC.Key_Space, QC.Key_Return, QC.Key_Enter):
                     self._new_game()
                     event.accept()
                     return
@@ -659,10 +789,9 @@ class NukerisPanel(QtWidgets.QWidget):
 
             if self.engine.game_over:
                 if key in (
-                    QtCore.Qt.Key.Key_Space,
-                    QtCore.Qt.Key.Key_Return,
-                    QtCore.Qt.Key.Key_Enter,
-                    QtCore.Qt.Key.Key_R,
+                    QC.Key_Space,
+                    QC.Key_Return,
+                    QC.Key_Enter,
                 ):
                     self._new_game()
                     event.accept()
@@ -670,18 +799,9 @@ class NukerisPanel(QtWidgets.QWidget):
                 event.ignore()
                 return
 
-            if key == QtCore.Qt.Key.Key_P:
-                self._set_paused(not self.paused)
-                event.accept()
-                return
-
             if self.paused:
-                if key in (QtCore.Qt.Key.Key_Space, QtCore.Qt.Key.Key_Return, QtCore.Qt.Key.Key_Enter):
+                if key in (QC.Key_Space, QC.Key_Return, QC.Key_Enter):
                     self._set_paused(False)
-                    event.accept()
-                    return
-                if key == QtCore.Qt.Key.Key_R:
-                    self._new_game()
                     event.accept()
                     return
                 event.ignore()
@@ -690,29 +810,26 @@ class NukerisPanel(QtWidgets.QWidget):
             handled = True
 
             # WASD + Q/E layout. Arrow keys remain available as a fallback.
-            if key in (QtCore.Qt.Key.Key_A, QtCore.Qt.Key.Key_Left):
+            if key in (QC.Key_A, QC.Key_Left):
                 self.engine.move(-1, 0)
-            elif key in (QtCore.Qt.Key.Key_D, QtCore.Qt.Key.Key_Right):
+            elif key in (QC.Key_D, QC.Key_Right):
                 self.engine.move(1, 0)
-            elif key in (QtCore.Qt.Key.Key_S, QtCore.Qt.Key.Key_Down):
+            elif key in (QC.Key_S, QC.Key_Down):
                 self.engine.soft_drop()
                 self._capture_clear_fx()
-            elif key == QtCore.Qt.Key.Key_Q:
+            elif key == QC.Key_Q:
                 if not event.isAutoRepeat():
                     self.engine.rotate(-1)
-            elif key in (QtCore.Qt.Key.Key_E, QtCore.Qt.Key.Key_Up):
+            elif key in (QC.Key_E, QC.Key_Up):
                 if not event.isAutoRepeat():
                     self.engine.rotate(1)
-            elif key == QtCore.Qt.Key.Key_C:
+            elif key == QC.Key_C:
                 if not event.isAutoRepeat():
                     self.engine.hold()
-            elif key in (QtCore.Qt.Key.Key_W, QtCore.Qt.Key.Key_Space):
+            elif key in (QC.Key_W, QC.Key_Space):
                 if not event.isAutoRepeat():
                     self.engine.hard_drop()
                     self._capture_clear_fx()
-            elif key == QtCore.Qt.Key.Key_R:
-                if not event.isAutoRepeat():
-                    self._new_game()
             else:
                 handled = False
 
@@ -727,13 +844,13 @@ class NukerisPanel(QtWidgets.QWidget):
 
     # ---------- Game timer ----------
 
-    def _on_timer(self) -> None:
+    def _on_timer(self) :
         try:
             if self.paused or not self.started or self.engine.game_over or not self.isVisible():
                 self._stop_timer()
                 return
 
-            now = time.monotonic()
+            now = _monotonic()
             dt = max(0.0, min(now - self._last_tick, 0.100))
             self._last_tick = now
             self._active_seconds += dt
@@ -757,19 +874,19 @@ class NukerisPanel(QtWidgets.QWidget):
     # ---------- Painting ----------
 
     @staticmethod
-    def _font(size: float, weight=QtGui.QFont.Weight.Normal) -> QtGui.QFont:
+    def _font(size, weight=QC.FontNormal) :
         app = QtWidgets.QApplication.instance()
         f = QtGui.QFont(app.font() if app is not None else QtGui.QFont())
         f.setPixelSize(max(8, int(size)))
         f.setWeight(weight)
         return f
 
-    def paintEvent(self, event: QtGui.QPaintEvent) -> None:
+    def paintEvent(self, event) :
         # Do not allow Python exceptions to escape a Qt paint callback inside Nuke.
         # A failed paint should disable the game UI safely, not destabilize the host.
         p = QtGui.QPainter(self)
         try:
-            p.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
+            p.setRenderHint(QC.Antialiasing, True)
             t = self._theme()
             p.fillRect(self.rect(), t["window"])
 
@@ -806,7 +923,7 @@ class NukerisPanel(QtWidgets.QWidget):
             self._draw_footer(p, margin, w, h, board_rect, t)
             self._draw_overlay(p, board_rect, t)
         except Exception as exc:
-            self.error_text = f"{type(exc).__name__}: {exc}"
+            self.error_text = "{0}: {1}".format(type(exc).__name__, exc)
             self.paused = True
             self.input_active = False
             self._stop_timer()
@@ -816,23 +933,23 @@ class NukerisPanel(QtWidgets.QWidget):
                 p.end()
 
     @staticmethod
-    def _format_time(seconds: float) -> str:
+    def _format_time(seconds) :
         total = max(0, int(seconds))
         mins, secs = divmod(total, 60)
         hours, mins = divmod(mins, 60)
         if hours:
-            return f"{hours:02d}:{mins:02d}:{secs:02d}"
-        return f"{mins:02d}:{secs:02d}"
+            return "{0:02d}:{1:02d}:{2:02d}".format(hours, mins, secs)
+        return "{0:02d}:{1:02d}".format(mins, secs)
 
-    def _draw_header(self, p: QtGui.QPainter, margin: float, width: float,
-                     t: Dict[str, QtGui.QColor]) -> None:
+    def _draw_header(self, p, margin, width,
+                     t) :
         # Properties-style node-name field: shallow inset with a soft top-light vertical
         # gradient. No heavy left shadow; the lighting reads as coming from above.
         title_h = 48.0
         p.fillRect(QtCore.QRectF(0.0, 0.0, width, title_h), t["titlebar"])
 
         accent = self._mix(t["highlight"], t["text"], 0.10)
-        p.setPen(QtCore.Qt.PenStyle.NoPen)
+        p.setPen(QC.NoPen)
         p.setBrush(accent)
         p.drawRect(QtCore.QRectF(0.0, 0.0, width, 2.0))
 
@@ -864,49 +981,49 @@ class NukerisPanel(QtWidgets.QWidget):
             QtCore.QPointF(name_rect.right() - 1.0, name_rect.bottom() - 1.0),
         )
 
-        title_font = self._font(21, QtGui.QFont.Weight.Medium)
+        title_font = self._font(21, QC.FontMedium)
         p.setFont(title_font)
         p.setPen(t["text"])
         title_text = PANEL_TITLE
         title_x = name_rect.left() + 10.0
         p.drawText(
             QtCore.QRectF(title_x, name_rect.top(), name_rect.width() - 20.0, name_rect.height()),
-            QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter,
+            QC.AlignLeft | QC.AlignVCenter,
             title_text,
         )
 
         title_w = float(QtGui.QFontMetrics(title_font).horizontalAdvance(title_text))
-        p.setFont(self._font(9, QtGui.QFont.Weight.Medium))
+        p.setFont(self._font(9, QC.FontMedium))
         p.setPen(t["muted"])
         version_x = title_x + title_w + 9.0
         p.drawText(
             QtCore.QRectF(version_x, name_rect.top() + 1.0, max(0.0, name_rect.right() - version_x - 8.0), name_rect.height()),
-            QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter,
-            f"v{__version__}",
+            QC.AlignLeft | QC.AlignVCenter,
+            "v{0}".format(__version__),
         )
 
         if width >= 720:
             status = "INPUT ACTIVE" if self.input_active and not self.paused else "INPUT RELEASED"
             p.setPen(t["muted"])
-            p.setFont(self._font(10, QtGui.QFont.Weight.Medium))
+            p.setFont(self._font(10, QC.FontMedium))
             p.drawText(
                 QtCore.QRectF(name_rect.right() - 155.0, name_rect.top(), 143.0, name_rect.height()),
-                QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter,
+                QC.AlignRight | QC.AlignVCenter,
                 status,
             )
 
-    def _draw_board(self, p: QtGui.QPainter, rect: QtCore.QRectF, cell: float,
-                    t: Dict[str, QtGui.QColor]) -> None:
+    def _draw_board(self, p, rect, cell,
+                    t) :
         # Node Graph-like playfield: no visible Tetris squares. The mechanics remain
         # grid based, but only node chunks and wires are rendered.
-        p.setPen(QtCore.Qt.PenStyle.NoPen)
+        p.setPen(QC.NoPen)
         p.setBrush(t["board"])
         p.drawRect(rect)
 
         # Give the active playfield a slightly more present recessed frame than the
         # side wells so it reads as the primary working area without going too black.
         frame_border = self._mix(t["border"], QtGui.QColor("#000000"), 0.12)
-        p.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+        p.setBrush(QC.NoBrush)
         p.setPen(QtGui.QPen(frame_border, 1.0))
         p.drawRect(rect)
 
@@ -959,12 +1076,12 @@ class NukerisPanel(QtWidgets.QWidget):
 
         self._draw_clear_effect(p, rect, cell, t)
 
-        p.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+        p.setBrush(QC.NoBrush)
         p.setPen(QtGui.QPen(self._mix(frame_border, t["text"], 0.05), 1.0))
         p.drawRect(rect)
 
-    def _draw_node_graph_grid(self, p: QtGui.QPainter, rect: QtCore.QRectF, cell: float,
-                              t: Dict[str, QtGui.QColor]) -> None:
+    def _draw_node_graph_grid(self, p, rect, cell,
+                              t) :
         """Draw a Nuke-like dotted grid whose intersections are the node centers.
 
         One grid interval is exactly one game-cell move. Because node centers are also
@@ -973,13 +1090,13 @@ class NukerisPanel(QtWidgets.QWidget):
         grid = self._mix(t["text"], t["board"], 0.54)
         grid.setAlpha(125)
         pen = QtGui.QPen(grid, 1.0)
-        pen.setStyle(QtCore.Qt.PenStyle.DotLine)
-        pen.setCapStyle(QtCore.Qt.PenCapStyle.FlatCap)
+        pen.setStyle(QC.DotLine)
+        pen.setCapStyle(QC.FlatCap)
 
         p.save()
         p.setClipRect(rect.adjusted(1.0, 1.0, -1.0, -1.0))
         p.setPen(pen)
-        p.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+        p.setBrush(QC.NoBrush)
 
         # Vertical and horizontal lines pass through the same centers used by _node_rect.
         for x in range(BOARD_W):
@@ -992,7 +1109,7 @@ class NukerisPanel(QtWidgets.QWidget):
         p.restore()
 
     @staticmethod
-    def _node_rect(board_rect: QtCore.QRectF, cell: float, x: int, y: int) -> QtCore.QRectF:
+    def _node_rect(board_rect, cell, x, y) :
         cx = board_rect.left() + (x + 0.5) * cell
         cy = board_rect.top() + (y + 0.5) * cell
         node_w = max(7.0, cell * 0.78)
@@ -1000,14 +1117,14 @@ class NukerisPanel(QtWidgets.QWidget):
         return QtCore.QRectF(cx - node_w * 0.5, cy - node_h * 0.5, node_w, node_h)
 
     @staticmethod
-    def _spanning_edges(cells: Sequence[Tuple[int, int]]) -> List[Tuple[Tuple[int, int], Tuple[int, int]]]:
+    def _spanning_edges(cells) :
         points = set(cells)
         if len(points) <= 1:
             return []
         root = min(points, key=lambda pt: (pt[1], pt[0]))
         queue = deque([root])
         seen = {root}
-        edges: List[Tuple[Tuple[int, int], Tuple[int, int]]] = []
+        edges = []
         # Prefer Nuke-like top-down flow, then branch horizontally.
         neighbor_order = ((0, 1), (-1, 0), (1, 0), (0, -1))
         while queue:
@@ -1020,10 +1137,10 @@ class NukerisPanel(QtWidgets.QWidget):
                     edges.append((current, nxt))
         return edges
 
-    def _draw_wire(self, p: QtGui.QPainter, board_rect: QtCore.QRectF, cell: float,
-                   source: Tuple[int, int], target: Tuple[int, int],
-                   t: Dict[str, QtGui.QColor], active: bool = False,
-                   ghost: bool = False, subtle: bool = False) -> None:
+    def _draw_wire(self, p, board_rect, cell,
+                   source, target,
+                   t, active = False,
+                   ghost = False, subtle = False) :
         sr = self._node_rect(board_rect, cell, source[0], source[1])
         tr = self._node_rect(board_rect, cell, target[0], target[1])
         start = QtCore.QPointF(sr.center().x(), sr.bottom() + 0.6)
@@ -1040,9 +1157,9 @@ class NukerisPanel(QtWidgets.QWidget):
 
         pen = QtGui.QPen(wire, max(1.0, cell * (0.048 if active else 0.040)))
         if ghost:
-            pen.setStyle(QtCore.Qt.PenStyle.DashLine)
+            pen.setStyle(QC.DashLine)
         p.setPen(pen)
-        p.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+        p.setBrush(QC.NoBrush)
         p.drawLine(start, end)
 
         # Small arrow head near the receiving node, matching Nuke's directional wires.
@@ -1057,14 +1174,14 @@ class NukerisPanel(QtWidgets.QWidget):
         base = QtCore.QPointF(tip.x() - ux * arrow_len, tip.y() - uy * arrow_len)
         a = QtCore.QPointF(base.x() + px * arrow_w, base.y() + py * arrow_w)
         b = QtCore.QPointF(base.x() - px * arrow_w, base.y() - py * arrow_w)
-        p.setPen(QtCore.Qt.PenStyle.NoPen)
+        p.setPen(QC.NoPen)
         p.setBrush(wire)
         p.drawPolygon(QtGui.QPolygonF([tip, a, b]))
 
-    def _draw_locked_graph(self, p: QtGui.QPainter, board_rect: QtCore.QRectF, cell: float,
-                           t: Dict[str, QtGui.QColor]) -> None:
-        groups: Dict[int, List[Tuple[int, int, str]]] = {}
-        occupied: Dict[Tuple[int, int], PlacedCell] = {}
+    def _draw_locked_graph(self, p, board_rect, cell,
+                           t) :
+        groups = {}
+        occupied = {}
         for y, row in enumerate(self.engine.board):
             for x, placed in enumerate(row):
                 if placed is None:
@@ -1091,10 +1208,10 @@ class NukerisPanel(QtWidgets.QWidget):
             for x, y, kind in entries:
                 self._draw_node(p, board_rect, cell, x, y, kind, t)
 
-    def _draw_piece_graph(self, p: QtGui.QPainter, board_rect: QtCore.QRectF, cell: float,
-                          cells: Sequence[Tuple[int, int]], kind: str,
-                          t: Dict[str, QtGui.QColor], active: bool = False,
-                          ghost: bool = False, show_label: bool = True) -> None:
+    def _draw_piece_graph(self, p, board_rect, cell,
+                          cells, kind,
+                          t, active = False,
+                          ghost = False, show_label = True) :
         for source, target in self._spanning_edges(cells):
             self._draw_wire(
                 p, board_rect, cell, source, target, t,
@@ -1106,10 +1223,10 @@ class NukerisPanel(QtWidgets.QWidget):
                 active=active, ghost=ghost, show_label=show_label,
             )
 
-    def _draw_node(self, p: QtGui.QPainter, board_rect: QtCore.QRectF, cell: float,
-                   x: int, y: int, kind: str, t: Dict[str, QtGui.QColor],
-                   active: bool = False, ghost: bool = False,
-                   show_label: bool = True) -> None:
+    def _draw_node(self, p, board_rect, cell,
+                   x, y, kind, t,
+                   active = False, ghost = False,
+                   show_label = True) :
         r = self._node_rect(board_rect, cell, x, y)
         style = NODE_STYLES[kind]
         base = QtGui.QColor(style["color"])
@@ -1117,9 +1234,9 @@ class NukerisPanel(QtWidgets.QWidget):
         if ghost:
             outline = self._mix(base, t["board"], 0.48)
             outline.setAlpha(118)
-            p.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+            p.setBrush(QC.NoBrush)
             pen = QtGui.QPen(outline, 1.0)
-            pen.setStyle(QtCore.Qt.PenStyle.DashLine)
+            pen.setStyle(QC.DashLine)
             p.setPen(pen)
             p.drawRect(r)
             return
@@ -1149,7 +1266,7 @@ class NukerisPanel(QtWidgets.QWidget):
 
         # Nuke node-like input/output connector ticks.
         port = QtGui.QColor("#0D0D0D")
-        p.setPen(QtCore.Qt.PenStyle.NoPen)
+        p.setPen(QC.NoPen)
         p.setBrush(port)
         port_r = max(1.0, min(2.2, cell * 0.060))
         p.drawEllipse(QtCore.QPointF(r.center().x(), r.top() - 0.2), port_r, port_r)
@@ -1162,11 +1279,11 @@ class NukerisPanel(QtWidgets.QWidget):
             text_color = QtGui.QColor("#111111") if base.lightness() >= 82 else QtGui.QColor("#E7E7E7")
             self._draw_fitted_node_label(p, r.adjusted(2.0, 1.0, -2.0, -1.0), label, text_color)
 
-    def _draw_fitted_node_label(self, p: QtGui.QPainter, rect: QtCore.QRectF,
-                                text: str, color: QtGui.QColor) -> None:
+    def _draw_fitted_node_label(self, p, rect,
+                                text, color) :
         if rect.width() <= 1.0 or rect.height() <= 1.0 or not text:
             return
-        font = self._font(12, QtGui.QFont.Weight.Medium)
+        font = self._font(12, QC.FontMedium)
         path = QtGui.QPainterPath()
         path.addText(0.0, 0.0, font, text)
         bounds = path.boundingRect()
@@ -1182,17 +1299,17 @@ class NukerisPanel(QtWidgets.QWidget):
         p.save()
         p.translate(tx, ty)
         p.scale(scale, scale)
-        p.setPen(QtCore.Qt.PenStyle.NoPen)
+        p.setPen(QC.NoPen)
         p.setBrush(color)
         p.drawPath(path)
         p.restore()
 
-    def _draw_clear_effect(self, p: QtGui.QPainter, board: QtCore.QRectF, cell: float,
-                           t: Dict[str, QtGui.QColor]) -> None:
+    def _draw_clear_effect(self, p, board, cell,
+                           t) :
         if not self._clear_fx_rows or self._clear_fx_started <= 0.0:
             return
 
-        elapsed = time.monotonic() - self._clear_fx_started
+        elapsed = _monotonic() - self._clear_fx_started
         if elapsed >= CLEAR_FX_SECONDS:
             self._clear_fx_rows = []
             self._clear_fx_started = 0.0
@@ -1234,7 +1351,7 @@ class NukerisPanel(QtWidgets.QWidget):
                 )
                 c = QtGui.QColor("#A0A0A0")
                 c.setAlpha(int(105 * fade))
-                p.setPen(QtCore.Qt.PenStyle.NoPen)
+                p.setPen(QC.NoPen)
                 p.setBrush(c)
                 p.drawRoundedRect(frag, 1.5, 1.5)
 
@@ -1248,8 +1365,8 @@ class NukerisPanel(QtWidgets.QWidget):
 
         p.restore()
 
-    def _draw_group_box(self, p: QtGui.QPainter, rect: QtCore.QRectF,
-                        t: Dict[str, QtGui.QColor]) -> None:
+    def _draw_group_box(self, p, rect,
+                        t) :
         # Preview wells are only a shallow recessed panel. Avoid the heavy black
         # outline that makes them look like separate game cards.
         fill = self._mix(t["base"], t["window"], 0.20)
@@ -1273,15 +1390,15 @@ class NukerisPanel(QtWidgets.QWidget):
             QtCore.QPointF(rect.right() - 1.0, rect.bottom() - 1.0),
         )
 
-    def _draw_section_header(self, p: QtGui.QPainter, x: float, y: float, width: float,
-                             text: str, t: Dict[str, QtGui.QColor]) -> float:
+    def _draw_section_header(self, p, x, y, width,
+                             text, t) :
         p.setPen(t["text"])
-        p.setFont(self._font(14, QtGui.QFont.Weight.DemiBold))
+        p.setFont(self._font(14, QC.FontDemiBold))
         fm = QtGui.QFontMetrics(p.font())
         label_w = float(fm.horizontalAdvance(text)) + 8.0
         p.drawText(
             QtCore.QRectF(x, y, label_w, 20.0),
-            QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter,
+            QC.AlignLeft | QC.AlignVCenter,
             text,
         )
         line_y = y + 10.0
@@ -1292,9 +1409,9 @@ class NukerisPanel(QtWidgets.QWidget):
         )
         return y + 22.0
 
-    def _draw_static_row(self, p: QtGui.QPainter, x: float, y: float, width: float,
-                         label: str, value: str, t: Dict[str, QtGui.QColor],
-                         emphasize: bool = False) -> None:
+    def _draw_static_row(self, p, x, y, width,
+                         label, value, t,
+                         emphasize = False) :
         # Nuke Grade-style label/value row. The value field uses a restrained vertical
         # gradient and a top-light cue; there is no exaggerated left-side shadow.
         row_h = 29.0
@@ -1305,12 +1422,12 @@ class NukerisPanel(QtWidgets.QWidget):
         box_rect = QtCore.QRectF(x + label_w + gap, box_y, width - label_w - gap, box_h)
 
         font_px = 13
-        row_font = self._font(font_px, QtGui.QFont.Weight.Normal)
+        row_font = self._font(font_px, QC.FontNormal)
         p.setFont(row_font)
         p.setPen(t["text"])
         p.drawText(
             QtCore.QRectF(x, y, label_w, row_h),
-            QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter,
+            QC.AlignRight | QC.AlignVCenter,
             label.lower(),
         )
 
@@ -1340,7 +1457,7 @@ class NukerisPanel(QtWidgets.QWidget):
             QtCore.QPointF(box_rect.right() - 1.0, box_rect.bottom() - 1.0),
         )
 
-        value_font = self._font(font_px, QtGui.QFont.Weight.Normal)
+        value_font = self._font(font_px, QC.FontNormal)
         text_rect = box_rect.adjusted(6.0, 0.0, -4.0, 0.0)
         while value_font.pixelSize() > 10:
             fm = QtGui.QFontMetrics(value_font)
@@ -1351,12 +1468,12 @@ class NukerisPanel(QtWidgets.QWidget):
         p.setPen(t["text"])
         p.drawText(
             text_rect,
-            QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter,
+            QC.AlignLeft | QC.AlignVCenter,
             value,
         )
 
-    def _draw_side_panels(self, p: QtGui.QPainter, board: QtCore.QRectF,
-                          side: float, gutter: float, t: Dict[str, QtGui.QColor]) -> None:
+    def _draw_side_panels(self, p, board,
+                          side, gutter, t) :
         left_x = board.left() - gutter - side
         right_x = board.right() + gutter
         top = board.top()
@@ -1370,10 +1487,10 @@ class NukerisPanel(QtWidgets.QWidget):
         stats_y = y + preview_h + 7.0
         stats_y = self._draw_section_header(p, left_x, stats_y, side, "STATS", t)
         rows = [
-            ("score", f"{self.engine.score:,}", True),
-            ("best", f"{self.engine.best_score:,}", False),
-            ("level", f"{self.engine.level:02d}", False),
-            ("lines", f"{self.engine.lines:03d}", False),
+            ("score", "{0:,}".format(self.engine.score), True),
+            ("best", "{0:,}".format(self.engine.best_score), False),
+            ("level", "{0:02d}".format(self.engine.level), False),
+            ("lines", "{0:03d}".format(self.engine.lines), False),
             ("time", self._format_time(self._active_seconds), True),
         ]
         for label, value, emphasize in rows:
@@ -1382,7 +1499,7 @@ class NukerisPanel(QtWidgets.QWidget):
 
         if self.engine.combo > 0 and stats_y + 29.0 <= board.bottom():
             self._draw_static_row(
-                p, left_x, stats_y, side, "combo", f"x{self.engine.combo + 1}", t, False
+                p, left_x, stats_y, side, "combo", "x{0}".format(self.engine.combo + 1), t, False
             )
 
         # NEXT
@@ -1395,36 +1512,38 @@ class NukerisPanel(QtWidgets.QWidget):
             )
             y += item_h + 3.0
 
-    def _draw_compact_stats(self, p: QtGui.QPainter, margin: float, width: float,
-                            board: QtCore.QRectF, t: Dict[str, QtGui.QColor]) -> None:
+    def _draw_compact_stats(self, p, margin, width,
+                            board, t) :
         # Narrow-pane fallback. Keep LINES immediately followed by TIME in reading order.
         y = max(margin + 35, board.top() - 24)
-        p.setFont(self._font(13, QtGui.QFont.Weight.Medium))
+        p.setFont(self._font(13, QC.FontMedium))
         p.setPen(t["text"])
         text = (
-            f"SCORE {self.engine.score:,}    LV {self.engine.level:02d}    "
-            f"LINES {self.engine.lines:03d}    TIME {self._format_time(self._active_seconds)}"
+            "SCORE {0:,}    LV {1:02d}    LINES {2:03d}    TIME {3}".format(
+                self.engine.score, self.engine.level, self.engine.lines,
+                self._format_time(self._active_seconds)
+            )
         )
         p.drawText(
             QtCore.QRectF(margin, y, width - 2 * margin, 18),
-            QtCore.Qt.AlignmentFlag.AlignCenter,
+            QC.AlignCenter,
             text,
         )
 
-    def _draw_label(self, p: QtGui.QPainter, x: float, y: float, width: float,
-                    text: str, t: Dict[str, QtGui.QColor]) -> None:
+    def _draw_label(self, p, x, y, width,
+                    text, t) :
         # Retained for small utility labels; section headings use _draw_section_header.
         p.setPen(t["muted"])
-        p.setFont(self._font(8, QtGui.QFont.Weight.DemiBold))
-        p.drawText(QtCore.QRectF(x, y, width, 16), QtCore.Qt.AlignmentFlag.AlignLeft, text)
+        p.setFont(self._font(8, QC.FontDemiBold))
+        p.drawText(QtCore.QRectF(x, y, width, 16), QC.AlignLeft, text)
 
-    def _draw_stat(self, p: QtGui.QPainter, x: float, y: float, width: float,
-                   label: str, value: str, t: Dict[str, QtGui.QColor]) -> None:
+    def _draw_stat(self, p, x, y, width,
+                   label, value, t) :
         self._draw_static_row(p, x, y, width, label, value, t, False)
 
-    def _draw_piece_preview(self, p: QtGui.QPainter, kind: Optional[str], x: float, y: float,
-                            width: float, height: float, t: Dict[str, QtGui.QColor],
-                            show_label: bool = True) -> None:
+    def _draw_piece_preview(self, p, kind, x, y,
+                            width, height, t,
+                            show_label = True) :
         r = QtCore.QRectF(x, y, width, height)
         preview_t = t
         if not show_label:
@@ -1433,8 +1552,8 @@ class NukerisPanel(QtWidgets.QWidget):
         self._draw_group_box(p, r, preview_t)
         if not kind:
             p.setPen(t["faint"])
-            p.setFont(self._font(9, QtGui.QFont.Weight.Medium))
-            p.drawText(r, QtCore.Qt.AlignmentFlag.AlignCenter, "—")
+            p.setFont(self._font(9, QC.FontMedium))
+            p.drawText(r, QC.AlignCenter, "—")
             return
 
         cells = list(PIECE_CELLS[kind][0])
@@ -1452,25 +1571,25 @@ class NukerisPanel(QtWidgets.QWidget):
             p, fake_board, c, cells, kind, t, active=False, ghost=False, show_label=show_label
         )
 
-    def _draw_keycap(self, p: QtGui.QPainter, x: float, y: float, text: str,
-                     t: Dict[str, QtGui.QColor], wide: bool = False) -> float:
+    def _draw_keycap(self, p, x, y, text,
+                     t, wide = False) :
         width = 42.0 if wide else max(22.0, 11.0 + len(text) * 7.0)
         rect = QtCore.QRectF(x, y, width, 20.0)
         p.setBrush(self._mix(t["base"], t["panel"], 0.10))
         p.setPen(QtGui.QPen(self._mix(t["border"], t["text"], 0.08), 1.0))
         p.drawRoundedRect(rect, 2.0, 2.0)
         p.setPen(t["text"])
-        p.setFont(self._font(10, QtGui.QFont.Weight.DemiBold))
-        p.drawText(rect, QtCore.Qt.AlignmentFlag.AlignCenter, text)
+        p.setFont(self._font(10, QC.FontDemiBold))
+        p.drawText(rect, QC.AlignCenter, text)
         return width
 
-    def _draw_bind(self, p: QtGui.QPainter, x: float, y: float, keys: Sequence[str],
-                   icon: str, label: str, t: Dict[str, QtGui.QColor]) -> float:
+    def _draw_bind(self, p, x, y, keys,
+                   icon, label, t) :
         start_x = x
         p.setPen(t["muted"])
-        p.setFont(self._font(13, QtGui.QFont.Weight.DemiBold))
+        p.setFont(self._font(13, QC.FontDemiBold))
         icon_rect = QtCore.QRectF(x, y, 18, 20)
-        p.drawText(icon_rect, QtCore.Qt.AlignmentFlag.AlignCenter, icon)
+        p.drawText(icon_rect, QC.AlignCenter, icon)
         x += 22
 
         for i, key in enumerate(keys):
@@ -1481,17 +1600,17 @@ class NukerisPanel(QtWidgets.QWidget):
 
         x += 6
         p.setPen(t["text"])
-        p.setFont(self._font(12, QtGui.QFont.Weight.Normal))
+        p.setFont(self._font(12, QC.FontNormal))
         label_w = max(34.0, float(QtGui.QFontMetrics(p.font()).horizontalAdvance(label)) + 2.0)
         p.drawText(
             QtCore.QRectF(x, y, label_w, 20),
-            QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter,
+            QC.AlignLeft | QC.AlignVCenter,
             label,
         )
         return (x + label_w) - start_x
 
-    def _draw_footer(self, p: QtGui.QPainter, margin: float, width: float, height: float,
-                     board: QtCore.QRectF, t: Dict[str, QtGui.QColor]) -> None:
+    def _draw_footer(self, p, margin, width, height,
+                     board, t) :
         game_y = board.bottom() + 16.0
         controls_y = game_y + 94.0
 
@@ -1519,7 +1638,7 @@ class NukerisPanel(QtWidgets.QWidget):
 
         available = max(1.0, width - 2.0 * margin)
         for row_index, row in enumerate(rows):
-            widths: List[float] = []
+            widths = []
             for keys, icon, label in row:
                 key_w = sum(42.0 if k == "SPACE" else max(22.0, 11.0 + len(k) * 7.0) for k in keys)
                 key_w += max(0, len(keys) - 1) * 3.0
@@ -1536,27 +1655,27 @@ class NukerisPanel(QtWidgets.QWidget):
         copyright_y = base_y + 53.0
         if copyright_y + 13.0 < height - 2.0:
             p.setPen(t["faint"])
-            p.setFont(self._font(9, QtGui.QFont.Weight.Normal))
+            p.setFont(self._font(9, QC.FontNormal))
             p.drawText(
                 QtCore.QRectF(margin, copyright_y, width - (2.0 * margin), 13.0),
-                QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter,
+                QC.AlignRight | QC.AlignVCenter,
                 "© 2026 Kota Mori",
             )
 
-    def _draw_overlay(self, p: QtGui.QPainter, board: QtCore.QRectF,
-                      t: Dict[str, QtGui.QColor]) -> None:
+    def _draw_overlay(self, p, board,
+                      t) :
         title = ""
         sub = ""
 
         if self.error_text:
             title = "SAFE PAUSE"
-            sub = "GAME ERROR — R TO RESTART"
+            sub = "GAME ERROR — USE NEW GAME"
         elif not self.started:
             title = "READY"
             sub = "CLICK BOARD OR PRESS SPACE"
         elif self.engine.game_over:
             title = "GAME OVER"
-            sub = f"{self.engine.score:,}  ·  SPACE / NEW GAME"
+            sub = "{0:,}  ·  SPACE / NEW GAME".format(self.engine.score)
         elif self.paused:
             title = "PAUSED"
             sub = "CLICK BOARD OR PRESS SPACE"
@@ -1566,24 +1685,24 @@ class NukerisPanel(QtWidgets.QWidget):
 
         veil = QtGui.QColor(t["board"])
         veil.setAlpha(224)
-        p.setPen(QtCore.Qt.PenStyle.NoPen)
+        p.setPen(QC.NoPen)
         p.setBrush(veil)
         p.drawRoundedRect(board, 2.0, 2.0)
 
         p.setPen(t["text"])
-        p.setFont(self._font(20, QtGui.QFont.Weight.DemiBold))
+        p.setFont(self._font(20, QC.FontDemiBold))
         center_y = board.center().y() - 19
         p.drawText(
             QtCore.QRectF(board.left(), center_y, board.width(), 28),
-            QtCore.Qt.AlignmentFlag.AlignCenter,
+            QC.AlignCenter,
             title,
         )
 
         p.setPen(t["muted"])
-        p.setFont(self._font(10, QtGui.QFont.Weight.Medium))
+        p.setFont(self._font(10, QC.FontMedium))
         p.drawText(
             QtCore.QRectF(board.left(), center_y + 31, board.width(), 20),
-            QtCore.Qt.AlignmentFlag.AlignCenter,
+            QC.AlignCenter,
             sub,
         )
 
@@ -1592,19 +1711,19 @@ class NukerisPanel(QtWidgets.QWidget):
             p.setFont(self._font(8))
             elided = QtGui.QFontMetrics(p.font()).elidedText(
                 self.error_text,
-                QtCore.Qt.TextElideMode.ElideRight,
+                QC.ElideRight,
                 int(board.width() - 40),
             )
             p.drawText(
                 QtCore.QRectF(board.left() + 20, center_y + 56, board.width() - 40, 20),
-                QtCore.Qt.AlignmentFlag.AlignCenter,
+                QC.AlignCenter,
                 elided,
             )
 
 
 # ---------- Nuke integration: panel registration only ----------
 
-def register_panel() -> None:
+def register_panel() :
     """Register NUKERIS in Nuke's Pane menu. No script data is touched."""
     try:
         import nuke
@@ -1613,7 +1732,7 @@ def register_panel() -> None:
         if not getattr(nuke, "GUI", False):
             return
 
-        widget_expr = f"__import__({__name__!r}).NukerisPanel"
+        widget_expr = "__import__({0!r}).NukerisPanel".format(__name__)
         panels.registerWidgetAsPanel(widget_expr, PANEL_TITLE, PANEL_ID)
     except Exception:
         # A registration problem should never block Nuke startup.
