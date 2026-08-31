@@ -35,4 +35,4 @@ jobs:
       - name: Compile release and dev builds with Python 2.7
         run: >-
           docker run --rm -v "$PWD:/work" -w /work python:2.7
-          sh -lc 'for file in nukeris.py nukeris_dev_*.py; do echo "Checking $file"; python -m py_compile "$file" || exit 1; done'
+          sh -lc 'for file in nukeris.py nukeris_dev_*.py; do [ -e "$file" ] || continue; echo "Checking $file"; python -m py_compile "$file" || exit 1; done'
