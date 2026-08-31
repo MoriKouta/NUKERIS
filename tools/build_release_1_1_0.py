@@ -54,9 +54,13 @@ text = text.replace(
 
 text = text.replace('sub = "GAME ERROR — R TO RESTART"', 'sub = "GAME ERROR — USE NEW GAME"', 1)
 
-for forbidden in ("QC.Key_P", "QC.Key_R"):
-    if forbidden in text:
-        raise RuntimeError("Release still contains shortcut: %s" % forbidden)
+residual = []
+for line_number, line in enumerate(text.splitlines(), 1):
+    if "QC.Key_P" in line or "QC.Key_R" in line:
+        residual.append((line_number, line))
+        print("RESIDUAL %d: %s" % (line_number, line))
+if residual:
+    raise RuntimeError("Release still contains P/R shortcut references")
 
 TARGET.write_text(text, encoding="utf-8")
 print("Wrote %s (%d bytes)" % (TARGET, TARGET.stat().st_size))
