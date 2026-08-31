@@ -8,7 +8,7 @@ Safety design:
 - Does not create/select/change nodes, viewers, frames, knobs, or undo state.
 - No Nuke callbacks, no threads, no global event filters, no global shortcuts.
 - Uses Qt ShortcutOverride only on this focused widget so Nuke single-key actions do not fire while playing.
-- No disk writes / settings files in this release build.
+- Writes only nukeris_settings.json next to this script to persist the best score.
 - The game timer stops while paused or hidden.
 - Keyboard input is handled only while this widget owns focus.
 
@@ -30,7 +30,9 @@ Compatibility:
 
 from __future__ import division, print_function, unicode_literals
 
+import json
 import math
+import os
 import random
 import time
 import traceback
@@ -79,7 +81,7 @@ QC.AlignVCenter = _enum_value(QtCore.Qt, "AlignmentFlag", "AlignVCenter")
 QC.ElideRight = _enum_value(QtCore.Qt, "TextElideMode", "ElideRight")
 for _key_name in (
     "Key_A", "Key_C", "Key_D", "Key_Down", "Key_E", "Key_Enter",
-    "Key_Escape", "Key_Left", "Key_P", "Key_Q", "Key_R", "Key_Return",
+    "Key_Escape", "Key_Left", "Key_Q", "Key_Return",
     "Key_Right", "Key_S", "Key_Space", "Key_Up", "Key_W"
 ):
     setattr(QC, _key_name, _enum_value(QtCore.Qt, "Key", _key_name))
@@ -112,6 +114,62 @@ BOARD_W = 10
 BOARD_H = 20
 NEXT_COUNT = 5
 CLEAR_FX_SECONDS = 0.28
+
+SETTINGS_FILENAME = "nukeris_settings.json"
+
+
+def _settings_path():
+    """Return the settings file beside this Python module."""
+    try:
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)), SETTINGS_FILENAME)
+    except Exception:
+        return None
+
+
+def _load_best_score():
+    """Load a persisted best score. Invalid/missing settings safely fall back to 0."""
+    path = _settings_path()
+    if not path:
+        return 0
+    try:
+        with open(path, "r") as handle:
+            data = json.load(handle)
+        value = int(data.get("best_score", 0))
+        return max(0, value)
+    except Exception:
+        return 0
+
+
+def _save_best_score(best_score):
+    """Persist the best score without ever allowing an I/O error to affect Nuke."""
+    path = _settings_path()
+    if not path:
+        return False
+
+    temp_path = path + ".tmp"
+    try:
+        with open(temp_path, "w") as handle:
+            json.dump(
+                {"best_score": max(0, int(best_score))},
+                handle,
+                indent=2,
+                sort_keys=True,
+            )
+            handle.write("\n")
+
+        # os.replace() is unavailable in Python 2.7, so use a compatible
+        # remove+rename sequence. The temporary file avoids partial JSON writes.
+        if os.path.exists(path):
+            os.remove(path)
+        os.rename(temp_path, path)
+        return True
+    except Exception:
+        try:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+        except Exception:
+            pass
+        return False
 
 # Representative Nuke node-class colors. These are intentionally close to the
 # familiar Node Graph palette rather than conventional Tetris colors.
@@ -226,8 +284,13 @@ class GameEngine(object):
     """Pure-Python game state. Intentionally has no Nuke or Qt dependency."""
 
     def __init__(self) :
-        self.best_score = 0
+        self.best_score = _load_best_score()
         self.reset()
+
+    def _update_best_score(self) :
+        if self.score > self.best_score:
+            self.best_score = self.score
+            _save_best_score(self.best_score)
 
     def reset(self) :
         self.board = [
@@ -275,7 +338,7 @@ class GameEngine(object):
         self.hold_used = False
         if not self._valid(self.active.cells()):
             self.game_over = True
-            self.best_score = max(self.best_score, self.score)
+            self._update_best_score()
 
     def _valid(self, cells) :
         for x, y in cells:
@@ -366,7 +429,7 @@ class GameEngine(object):
         cells = self.active.cells()
         if any(y < 0 for _, y in cells):
             self.game_over = True
-            self.best_score = max(self.best_score, self.score)
+            self._update_best_score()
             return
 
         group_id = self._next_group_id
@@ -377,7 +440,7 @@ class GameEngine(object):
         cleared = self._clear_lines()
         self.last_clear = cleared
         self._score_clear(cleared)
-        self.best_score = max(self.best_score, self.score)
+        self._update_best_score()
         self._spawn()
 
     def _clear_lines(self) :
@@ -678,8 +741,8 @@ class NukerisPanel(QtWidgets.QWidget):
 
     _GAME_KEYS = {
         QC.Key_A, QC.Key_D, QC.Key_S, QC.Key_W,
-        QC.Key_Q, QC.Key_E, QC.Key_C, QC.Key_R,
-        QC.Key_P, QC.Key_Space, QC.Key_Left,
+        QC.Key_Q, QC.Key_E, QC.Key_C,
+        QC.Key_Space, QC.Key_Left,
         QC.Key_Right, QC.Key_Down, QC.Key_Up,
         QC.Key_Escape, QC.Key_Return, QC.Key_Enter,
     }
@@ -713,10 +776,6 @@ class NukerisPanel(QtWidgets.QWidget):
                 return
 
             if self.error_text:
-                if key == QC.Key_R:
-                    self._new_game()
-                    event.accept()
-                    return
                 event.ignore()
                 return
 
@@ -733,7 +792,6 @@ class NukerisPanel(QtWidgets.QWidget):
                     QC.Key_Space,
                     QC.Key_Return,
                     QC.Key_Enter,
-                    QC.Key_R,
                 ):
                     self._new_game()
                     event.accept()
@@ -741,18 +799,9 @@ class NukerisPanel(QtWidgets.QWidget):
                 event.ignore()
                 return
 
-            if key == QC.Key_P:
-                self._set_paused(not self.paused)
-                event.accept()
-                return
-
             if self.paused:
                 if key in (QC.Key_Space, QC.Key_Return, QC.Key_Enter):
                     self._set_paused(False)
-                    event.accept()
-                    return
-                if key == QC.Key_R:
-                    self._new_game()
                     event.accept()
                     return
                 event.ignore()
@@ -781,9 +830,6 @@ class NukerisPanel(QtWidgets.QWidget):
                 if not event.isAutoRepeat():
                     self.engine.hard_drop()
                     self._capture_clear_fx()
-            elif key == QC.Key_R:
-                if not event.isAutoRepeat():
-                    self._new_game()
             else:
                 handled = False
 
@@ -1623,7 +1669,7 @@ class NukerisPanel(QtWidgets.QWidget):
 
         if self.error_text:
             title = "SAFE PAUSE"
-            sub = "GAME ERROR — R TO RESTART"
+            sub = "GAME ERROR — USE NEW GAME"
         elif not self.started:
             title = "READY"
             sub = "CLICK BOARD OR PRESS SPACE"
