@@ -1,0 +1,47 @@
+name: Build NUKERIS v1.1.0
+
+on:
+  push:
+    branches:
+      - compat/nuke12-17
+    paths:
+      - tools/build_release_1_1_0.py
+      - .github/workflows/build-release-1-1-0.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: compat/nuke12-17
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build release file
+        run: python tools/build_release_1_1_0.py
+
+      - name: Validate Python 3 syntax
+        run: python -m py_compile nukeris.py
+
+      - name: Validate Python 2.7 syntax
+        run: docker run --rm -v "$PWD:/work" -w /work python:2.7 python -m py_compile nukeris.py
+
+      - name: Commit release file
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add nukeris.py
+          if git diff --cached --quiet; then
+            echo "No release file change required."
+          else
+            git commit -m "Prepare NUKERIS v1.1.0"
+            git push origin HEAD:compat/nuke12-17
+          fi
