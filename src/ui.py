@@ -72,8 +72,10 @@ class NukerisPanel(QtWidgets.QWidget):
         self.setMouseTracking(True)
         self.setMinimumSize(360, 600)
 
+        self.settings = SettingsStore()
+        self.preferences = self.settings.read()
         self.session = None
-        self.engine = GameEngine()
+        self.engine = GameEngine(storage=self.settings)
         self.started = False
         self.paused = True
         self.input_active = False
@@ -101,18 +103,21 @@ class NukerisPanel(QtWidgets.QWidget):
         # intentionally a genuine checkbox. It affects drawing only and never touches Nuke.
         self._grid_checkbox = QtWidgets.QCheckBox("Node Graph grid", self)
         self._grid_checkbox.setObjectName("NukerisNodeGraphGrid")
-        self._grid_checkbox.setChecked(False)
+        self._grid_checkbox.setChecked(self.preferences['grid'])
         self._grid_checkbox.setFocusPolicy(QC.NoFocus)
         self._grid_checkbox.setCursor(QC.PointingHandCursor)
         self._grid_checkbox.setToolTip(
             "Show a Nuke-style dotted grid aligned exactly to the one-cell movement step."
         )
-        self._grid_checkbox.toggled.connect(lambda _checked: self.update())
+        self._grid_checkbox.toggled.connect(self._grid_changed)
 
         self._mode_combo = QtWidgets.QComboBox(self)
         self._mode_combo.addItems(MODE_LABELS)
         self._mode_combo.setFocusPolicy(QC.NoFocus)
         self._mode_combo.setToolTip('Select a mode, then start a new game.')
+        self._ranking_button = QtWidgets.QPushButton('RANKING', self)
+        self._ranking_button.setFocusPolicy(QC.NoFocus)
+        self._ranking_button.clicked.connect(self._show_ranking)
         self._apply_button_style()
 
     # ---------- Palette / Nuke look ----------
@@ -225,6 +230,7 @@ class NukerisPanel(QtWidgets.QWidget):
         self._grid_checkbox.setGeometry(
             int(round(margin)), int(round(button_y + 35.0)), int(round(checkbox_w)), 24
         )
+        self._ranking_button.setGeometry(int(margin+button_w+8), int(button_y), 100, 28)
         self._mode_combo.setGeometry(12, 54, min(220, int(w)-140), 26)
         QtWidgets.QWidget.resizeEvent(self, event)
 
@@ -255,7 +261,8 @@ class NukerisPanel(QtWidgets.QWidget):
 
     def _new_game(self) :
         mode = MODES[self._mode_combo.currentIndex()]
-        self.session = GameSession(mode)
+        self.session = GameSession(mode, storage=self.settings)
+        self._result_recorded = False
         self.engine = self.session.engine
         self.started = True
         self.paused = False
@@ -439,11 +446,33 @@ class NukerisPanel(QtWidgets.QWidget):
 
     # ---------- Game timer ----------
 
+    def _grid_changed(self, checked):
+        self.preferences['grid'] = bool(checked)
+        self.settings.save_preferences({'grid': bool(checked)})
+        self.update()
+
+    def _record_result(self, result):
+        if result and result['mode'] != NORMAL:
+            self.settings.record(result)
+
+    def _show_ranking(self):
+        self._set_paused(True, release_input=True)
+        values = self.settings.personal()
+        lines = ['NORMAL BEST  {0:,}'.format(self.settings.best())]
+        for mode, label in zip(MODES[1:], MODE_LABELS[1:]):
+            r = values.get(mode + '/' + RULESET)
+            value = 'NO RECORD' if r is None else (format_milliseconds(r['time_ms']) if mode == SPRINT else '{0:,}'.format(r['score']))
+            lines.append(label + '  ' + value)
+        QtWidgets.QMessageBox.information(self, 'PERSONAL RANKING', '\n\n'.join(lines))
+
     def _check_session(self):
         if self.session is None:
             return False
         self.session.advance()
         if self.session.finished:
+            if not self._result_recorded:
+                self._result_recorded = True
+                self._record_result(self.session.result)
             self.paused = True
             self.input_active = False
             self._stop_timer()
