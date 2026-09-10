@@ -38,69 +38,6 @@ import time
 import traceback
 from collections import deque
 
-try:
-    from PySide6 import QtCore, QtGui, QtWidgets
-    QT_BINDING = "PySide6"
-except ImportError:
-    from PySide2 import QtCore, QtGui, QtWidgets
-    QT_BINDING = "PySide2"
-
-
-def _enum_value(root, group_name, value_name):
-    """Return a scoped Qt6 enum or its legacy Qt5 equivalent."""
-    group = getattr(root, group_name, None)
-    if group is not None and hasattr(group, value_name):
-        return getattr(group, value_name)
-    return getattr(root, value_name)
-
-
-class _QtCompat(object):
-    pass
-
-
-QC = _QtCompat()
-# QtCore.Qt enums
-QC.StrongFocus = _enum_value(QtCore.Qt, "FocusPolicy", "StrongFocus")
-QC.NoFocus = _enum_value(QtCore.Qt, "FocusPolicy", "NoFocus")
-QC.MouseFocusReason = _enum_value(QtCore.Qt, "FocusReason", "MouseFocusReason")
-QC.PointingHandCursor = _enum_value(QtCore.Qt, "CursorShape", "PointingHandCursor")
-QC.PreciseTimer = _enum_value(QtCore.Qt, "TimerType", "PreciseTimer")
-QC.LeftButton = _enum_value(QtCore.Qt, "MouseButton", "LeftButton")
-QC.ControlModifier = _enum_value(QtCore.Qt, "KeyboardModifier", "ControlModifier")
-QC.AltModifier = _enum_value(QtCore.Qt, "KeyboardModifier", "AltModifier")
-QC.MetaModifier = _enum_value(QtCore.Qt, "KeyboardModifier", "MetaModifier")
-QC.NoPen = _enum_value(QtCore.Qt, "PenStyle", "NoPen")
-QC.DashLine = _enum_value(QtCore.Qt, "PenStyle", "DashLine")
-QC.DotLine = _enum_value(QtCore.Qt, "PenStyle", "DotLine")
-QC.NoBrush = _enum_value(QtCore.Qt, "BrushStyle", "NoBrush")
-QC.FlatCap = _enum_value(QtCore.Qt, "PenCapStyle", "FlatCap")
-QC.AlignCenter = _enum_value(QtCore.Qt, "AlignmentFlag", "AlignCenter")
-QC.AlignLeft = _enum_value(QtCore.Qt, "AlignmentFlag", "AlignLeft")
-QC.AlignRight = _enum_value(QtCore.Qt, "AlignmentFlag", "AlignRight")
-QC.AlignVCenter = _enum_value(QtCore.Qt, "AlignmentFlag", "AlignVCenter")
-QC.ElideRight = _enum_value(QtCore.Qt, "TextElideMode", "ElideRight")
-for _key_name in (
-    "Key_A", "Key_C", "Key_D", "Key_Down", "Key_E", "Key_Enter",
-    "Key_Escape", "Key_Left", "Key_Q", "Key_Return",
-    "Key_Right", "Key_S", "Key_Space", "Key_Up", "Key_W"
-):
-    setattr(QC, _key_name, _enum_value(QtCore.Qt, "Key", _key_name))
-
-# QEvent enums
-QC.PaletteChange = _enum_value(QtCore.QEvent, "Type", "PaletteChange")
-QC.ApplicationPaletteChange = _enum_value(QtCore.QEvent, "Type", "ApplicationPaletteChange")
-QC.ShortcutOverride = _enum_value(QtCore.QEvent, "Type", "ShortcutOverride")
-
-# QPalette roles
-for _role in ("Window", "WindowText", "ButtonText", "Highlight", "Base", "Button", "Shadow", "Light"):
-    setattr(QC, "Palette" + _role, _enum_value(QtGui.QPalette, "ColorRole", _role))
-
-# QFont weights and QPainter render hint
-QC.FontNormal = _enum_value(QtGui.QFont, "Weight", "Normal")
-QC.FontMedium = _enum_value(QtGui.QFont, "Weight", "Medium")
-QC.FontDemiBold = _enum_value(QtGui.QFont, "Weight", "DemiBold")
-QC.Antialiasing = _enum_value(QtGui.QPainter, "RenderHint", "Antialiasing")
-
 # Python 2.7 has no time.monotonic(). Wall-clock fallback is sufficient because
 # every frame delta is clamped and timer state is reset on pause/resume.
 _monotonic = getattr(time, "monotonic", time.time)
@@ -118,6 +55,140 @@ CLEAR_FX_SECONDS = 0.28
 SETTINGS_FILENAME = "nukeris_settings.json"
 
 
+# Persistence primitives. No Qt, Nuke, network, or background work.
+import errno
+import tempfile
+
+
+def read_json(path, default=None, limit=1048576):
+    try:
+        with open(path, 'rb') as handle:
+            raw = handle.read(limit + 1)
+        if len(raw) > limit:
+            return default
+        value = json.loads(raw.decode('utf-8'))
+        return value if isinstance(value, dict) else default
+    except (IOError, OSError, ValueError, UnicodeError):
+        return default
+
+
+def ensure_directory(path):
+    try:
+        os.makedirs(path, 0o700)
+    except OSError as exc:
+        if exc.errno != errno.EEXIST or not os.path.isdir(path):
+            raise
+
+
+def replace_file(source, target):
+    """Never unlink the existing target; failure preserves the previous file."""
+    if hasattr(os, 'replace'):
+        os.replace(source, target)
+    elif os.name == 'nt':
+        # Python 2.7 Windows: os.rename cannot replace an existing destination.
+        import ctypes
+        from ctypes import wintypes
+        move = ctypes.WinDLL('kernel32', use_last_error=True).MoveFileExW
+        move.argtypes = (wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD)
+        move.restype = wintypes.BOOL
+        def wide(path):
+            if isinstance(path, bytes):
+                return path.decode(__import__('sys').getfilesystemencoding())
+            return path
+        if not move(wide(source), wide(target), 0x1 | 0x8):
+            raise ctypes.WinError(ctypes.get_last_error())
+    else:
+        os.rename(source, target)
+
+
+def atomic_json(path, value, replace=None):
+    """Unique same-directory temp, complete/flush/fsync/close, then replace."""
+    folder = os.path.dirname(os.path.abspath(path))
+    ensure_directory(folder)
+    descriptor, temp = tempfile.mkstemp(prefix='.' + os.path.basename(path) + '.',
+                                        suffix='.tmp', dir=folder)
+    try:
+        with os.fdopen(descriptor, 'wb') as handle:
+            raw = json.dumps(value, sort_keys=True, indent=2, allow_nan=False)
+            handle.write((raw + '\n').encode('utf-8'))
+            handle.flush()
+            os.fsync(handle.fileno())
+        (replace or replace_file)(temp, path)
+    finally:
+        if os.path.exists(temp):
+            os.remove(temp)
+
+
+class FileLock(object):
+    """Nonblocking OS lock; a busy store fails safely rather than waiting in UI."""
+    def __init__(self, path):
+        self.path = path + '.lockfile'
+        self.handle = None
+
+    def __enter__(self):
+        ensure_directory(os.path.dirname(os.path.abspath(self.path)))
+        fd = os.open(self.path, os.O_CREAT | os.O_RDWR, 0o600)
+        self.handle = os.fdopen(fd, 'r+b')
+        try:
+            if os.name == 'nt':
+                import msvcrt
+                if os.fstat(fd).st_size == 0:
+                    self.handle.write(b'0')
+                    self.handle.flush()
+                self.handle.seek(0)
+                msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return self
+        except Exception:
+            self.handle.close()
+            raise
+
+    def __exit__(self, *args):
+        self.handle.close()
+
+
+class JsonStore(object):
+    def __init__(self, path):
+        self.path = path
+        self.last_error = ''
+
+    def read(self):
+        return read_json(self.path, {})
+
+    def update(self, change):
+        try:
+            with FileLock(self.path):
+                value = change(self.read())
+                atomic_json(self.path, value)
+            self.last_error = ''
+            return value
+        except Exception:
+            self.last_error = 'Settings could not be saved. The previous file was preserved.'
+            return None
+
+
+def nonnegative_int(value, default=0):
+    try:
+        return max(0, int(value))
+    except (ValueError, TypeError, OverflowError):
+        return default
+
+
+class LegacyScoreStore(JsonStore):
+    def best(self):
+        return nonnegative_int(self.read().get('best_score', 0))
+
+    def save_best(self, score):
+        def merge(current):
+            current['best_score'] = max(nonnegative_int(current.get('best_score')),
+                                        nonnegative_int(score))
+            return current
+        result = self.update(merge)
+        return result is not None
+
+
 def _settings_path():
     """Return the settings file beside this Python module."""
     try:
@@ -127,49 +198,12 @@ def _settings_path():
 
 
 def _load_best_score():
-    """Load a persisted best score. Invalid/missing settings safely fall back to 0."""
-    path = _settings_path()
-    if not path:
-        return 0
-    try:
-        with open(path, "r") as handle:
-            data = json.load(handle)
-        value = int(data.get("best_score", 0))
-        return max(0, value)
-    except Exception:
-        return 0
+    return LegacyScoreStore(_settings_path()).best()
 
 
 def _save_best_score(best_score):
-    """Persist the best score without ever allowing an I/O error to affect Nuke."""
-    path = _settings_path()
-    if not path:
-        return False
+    return LegacyScoreStore(_settings_path()).save_best(best_score)
 
-    temp_path = path + ".tmp"
-    try:
-        with open(temp_path, "w") as handle:
-            json.dump(
-                {"best_score": max(0, int(best_score))},
-                handle,
-                indent=2,
-                sort_keys=True,
-            )
-            handle.write("\n")
-
-        # os.replace() is unavailable in Python 2.7, so use a compatible
-        # remove+rename sequence. The temporary file avoids partial JSON writes.
-        if os.path.exists(path):
-            os.remove(path)
-        os.rename(temp_path, path)
-        return True
-    except Exception:
-        try:
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-        except Exception:
-            pass
-        return False
 
 # Representative Nuke node-class colors. These are intentionally close to the
 # familiar Node Graph palette rather than conventional Tetris colors.
@@ -283,14 +317,18 @@ class PlacedCell(object):
 class GameEngine(object):
     """Pure-Python game state. Intentionally has no Nuke or Qt dependency."""
 
-    def __init__(self) :
-        self.best_score = _load_best_score()
+    def __init__(self, storage=None, seed=None) :
+        self.storage = storage if storage is not None else LegacyScoreStore(_settings_path())
+        self.seed = seed
+        self.rng = random.Random(seed)
+        self.best_score = self.storage.best()
         self.reset()
 
     def _update_best_score(self) :
         if self.score > self.best_score:
             self.best_score = self.score
-            _save_best_score(self.best_score)
+            self.storage.save_best(self.best_score)
+            self.best_score = max(self.best_score, self.storage.best())
 
     def reset(self) :
         self.board = [
@@ -318,8 +356,8 @@ class GameEngine(object):
 
     def _fill_queue(self) :
         while len(self.queue) < 14:
-            bag = list(PIECE_CELLS.keys())
-            random.shuffle(bag)
+            bag = sorted(PIECE_CELLS.keys())
+            self.rng.shuffle(bag)
             self.queue.extend(bag)
 
     def next_pieces(self, count = NEXT_COUNT) :
@@ -469,6 +507,69 @@ class GameEngine(object):
                 self.score += 50 * self.combo * self.level
         else:
             self.combo = -1
+
+try:
+    from PySide6 import QtCore, QtGui, QtWidgets
+    QT_BINDING = "PySide6"
+except ImportError:
+    from PySide2 import QtCore, QtGui, QtWidgets
+    QT_BINDING = "PySide2"
+
+
+def _enum_value(root, group_name, value_name):
+    """Return a scoped Qt6 enum or its legacy Qt5 equivalent."""
+    group = getattr(root, group_name, None)
+    if group is not None and hasattr(group, value_name):
+        return getattr(group, value_name)
+    return getattr(root, value_name)
+
+
+class _QtCompat(object):
+    pass
+
+
+QC = _QtCompat()
+# QtCore.Qt enums
+QC.StrongFocus = _enum_value(QtCore.Qt, "FocusPolicy", "StrongFocus")
+QC.NoFocus = _enum_value(QtCore.Qt, "FocusPolicy", "NoFocus")
+QC.MouseFocusReason = _enum_value(QtCore.Qt, "FocusReason", "MouseFocusReason")
+QC.PointingHandCursor = _enum_value(QtCore.Qt, "CursorShape", "PointingHandCursor")
+QC.PreciseTimer = _enum_value(QtCore.Qt, "TimerType", "PreciseTimer")
+QC.LeftButton = _enum_value(QtCore.Qt, "MouseButton", "LeftButton")
+QC.ControlModifier = _enum_value(QtCore.Qt, "KeyboardModifier", "ControlModifier")
+QC.AltModifier = _enum_value(QtCore.Qt, "KeyboardModifier", "AltModifier")
+QC.MetaModifier = _enum_value(QtCore.Qt, "KeyboardModifier", "MetaModifier")
+QC.NoPen = _enum_value(QtCore.Qt, "PenStyle", "NoPen")
+QC.DashLine = _enum_value(QtCore.Qt, "PenStyle", "DashLine")
+QC.DotLine = _enum_value(QtCore.Qt, "PenStyle", "DotLine")
+QC.NoBrush = _enum_value(QtCore.Qt, "BrushStyle", "NoBrush")
+QC.FlatCap = _enum_value(QtCore.Qt, "PenCapStyle", "FlatCap")
+QC.AlignCenter = _enum_value(QtCore.Qt, "AlignmentFlag", "AlignCenter")
+QC.AlignLeft = _enum_value(QtCore.Qt, "AlignmentFlag", "AlignLeft")
+QC.AlignRight = _enum_value(QtCore.Qt, "AlignmentFlag", "AlignRight")
+QC.AlignVCenter = _enum_value(QtCore.Qt, "AlignmentFlag", "AlignVCenter")
+QC.ElideRight = _enum_value(QtCore.Qt, "TextElideMode", "ElideRight")
+for _key_name in (
+    "Key_A", "Key_C", "Key_D", "Key_Down", "Key_E", "Key_Enter",
+    "Key_Escape", "Key_Left", "Key_Q", "Key_Return",
+    "Key_Right", "Key_S", "Key_Space", "Key_Up", "Key_W"
+):
+    setattr(QC, _key_name, _enum_value(QtCore.Qt, "Key", _key_name))
+
+# QEvent enums
+QC.PaletteChange = _enum_value(QtCore.QEvent, "Type", "PaletteChange")
+QC.ApplicationPaletteChange = _enum_value(QtCore.QEvent, "Type", "ApplicationPaletteChange")
+QC.ShortcutOverride = _enum_value(QtCore.QEvent, "Type", "ShortcutOverride")
+
+# QPalette roles
+for _role in ("Window", "WindowText", "ButtonText", "Highlight", "Base", "Button", "Shadow", "Light"):
+    setattr(QC, "Palette" + _role, _enum_value(QtGui.QPalette, "ColorRole", _role))
+
+# QFont weights and QPainter render hint
+QC.FontNormal = _enum_value(QtGui.QFont, "Weight", "Normal")
+QC.FontMedium = _enum_value(QtGui.QFont, "Weight", "Medium")
+QC.FontDemiBold = _enum_value(QtGui.QFont, "Weight", "DemiBold")
+QC.Antialiasing = _enum_value(QtGui.QPainter, "RenderHint", "Antialiasing")
 
 
 class NukerisPanel(QtWidgets.QWidget):
