@@ -12,6 +12,8 @@ The Normal trace fixture was captured from v1.1.0 `f12d176` using an explicit fi
 
 ## Local evidence during implementation
 
+The UI Polish pass adds five pure-Python location/probe tests (50 total) and `tests/qt_polish_checks.py`. It checks timer hierarchy, profile/opt-in round trips, failed saves, readable locations, disabled I/O, Studio TEST, wire endpoints, pause dimming and layout artifacts. Import/open checks replace the network-manager factory with a guard that fails on any creation. See [UI Polish scope and badge investigation](UI_POLISH.md). New source/test execution and the latest PR CI must pass before the polish commit is considered ready for user runtime testing.
+
 Windows: Python 3.12.14, Node 24.19.0, isolated PySide6 6.8.3. Pure Python tests, backend tests and Qt smoke/transport checks pass. Standard/Compact and both dialogs were rendered offscreen and visually inspected. This is **not Nuke runtime verification**. No installed Nuke was launched and no user's comp/settings were used.
 
 Local Python 2.7 and PySide2 runtimes were unavailable. The Windows Python 2 replacement path was exercised using the fallback under Python 3, which is not the same as running Python 2.7. CI is configured for actual Python 2.7.18 on Linux, Python 3.11/3.12 on Windows/Linux, PySide2 5.15.2.1 and PySide6 6.5.3 on Windows/Linux, plus backend tests. Consult the PR checks for current outcomes; configuration alone is not success evidence.

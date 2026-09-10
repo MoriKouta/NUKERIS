@@ -204,7 +204,7 @@ NODE_STYLES = {
 # The reference Node Graph screenshots sit at roughly #323232. Keep the playfield
 # on that graph color while the surrounding tool chrome still follows Nuke's Qt palette.
 NUKE_GRAPH_BG = "#323232"
-NUKE_WIRE = "#111111"
+NUKE_WIRE = "#929292"
 
 # SRS-compatible piece states in a 4x4 local grid.
 PIECE_CELLS = {
@@ -495,6 +495,10 @@ class GameEngine(object):
             self.combo = -1
 
 # Pure geometry shared by rendering and regression tests.
+def node_dimensions(cell):
+    return max(7.0, cell * .78), max(5.0, cell * .56)
+
+
 def wire_endpoints(source, target, cell, origin=(0, 0)):
     dx, dy = target[0] - source[0], target[1] - source[1]
     if abs(dx) + abs(dy) != 1:
@@ -503,7 +507,8 @@ def wire_endpoints(source, target, cell, origin=(0, 0)):
     sy = origin[1] + (source[1] + 0.5) * cell
     tx = origin[0] + (target[0] + 0.5) * cell
     ty = origin[1] + (target[1] + 0.5) * cell
-    half_w, half_h = max(7.0, cell * .78) / 2, max(5.0, cell * .46) / 2
+    node_w, node_h = node_dimensions(cell)
+    half_w, half_h = node_w / 2, node_h / 2
     return ((sx + dx * half_w, sy + dy * half_h),
             (tx - dx * half_w, ty - dy * half_h))
 
@@ -513,9 +518,9 @@ def panel_layout(width, height):
     compact = width < 650
     side = 0.0 if compact else 132.0
     gutter = 12.0 if side else 0.0
-    top = 166.0 if compact else 94.0
+    top = 150.0 if compact else 90.0
     cell = max(7.0, math.floor(min((width - 2*margin - 2*side - 2*gutter)/BOARD_W,
-                                   (height - top - 204.0)/BOARD_H)))
+                                   (height - top - (180.0 if compact else 160.0))/BOARD_H)))
     bw, bh = cell*BOARD_W, cell*BOARD_H
     return dict(margin=margin, compact=compact, side=side, gutter=gutter, cell=cell,
                 board=((width-bw)/2, top, bw, bh))
@@ -728,6 +733,368 @@ class SettingsStore(JsonStore):
         return results
 
 COUNTRY_CODES = 'AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW'.split()
+
+# Bundled English country labels from Unicode CLDR (retrieved 2026-09-11).
+# https://github.com/unicode-org/cldr-json
+# UNICODE LICENSE V3
+#
+# COPYRIGHT AND PERMISSION NOTICE
+#
+# Copyright © 2015-2024 Unicode, Inc.
+#
+# NOTICE TO USER: Carefully read the following legal agreement. BY
+# DOWNLOADING, INSTALLING, COPYING OR OTHERWISE USING DATA FILES, AND/OR
+# SOFTWARE, YOU UNEQUIVOCALLY ACCEPT, AND AGREE TO BE BOUND BY, ALL OF THE
+# TERMS AND CONDITIONS OF THIS AGREEMENT. IF YOU DO NOT AGREE, DO NOT
+# DOWNLOAD, INSTALL, COPY, DISTRIBUTE OR USE THE DATA FILES OR SOFTWARE.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of data files and any associated documentation (the "Data Files") or
+# software and any associated documentation (the "Software") to deal in the
+# Data Files or Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, and/or sell
+# copies of the Data Files or Software, and to permit persons to whom the
+# Data Files or Software are furnished to do so, provided that either (a)
+# this copyright and permission notice appear with all copies of the Data
+# Files or Software, or (b) this copyright and permission notice appear in
+# associated Documentation.
+#
+# THE DATA FILES AND SOFTWARE ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY
+# KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF
+# THIRD PARTY RIGHTS.
+#
+# IN NO EVENT SHALL THE COPYRIGHT HOLDER OR HOLDERS INCLUDED IN THIS NOTICE
+# BE LIABLE FOR ANY CLAIM, OR ANY SPECIAL INDIRECT OR CONSEQUENTIAL DAMAGES,
+# OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,
+# WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
+# ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THE DATA
+# FILES OR SOFTWARE.
+#
+# Except as contained in this notice, the name of a copyright holder shall
+# not be used in advertising or otherwise to promote the sale, use or other
+# dealings in these Data Files or Software without prior written
+# authorization of the copyright holder.
+#
+# SPDX-License-Identifier: Unicode-3.0
+
+# Display data only: no runtime lookup, locale detection or geolocation.
+COUNTRY_LABELS = {
+    "AD": "Andorra",
+    "AE": "United Arab Emirates",
+    "AF": "Afghanistan",
+    "AG": "Antigua & Barbuda",
+    "AI": "Anguilla",
+    "AL": "Albania",
+    "AM": "Armenia",
+    "AO": "Angola",
+    "AQ": "Antarctica",
+    "AR": "Argentina",
+    "AS": "American Samoa",
+    "AT": "Austria",
+    "AU": "Australia",
+    "AW": "Aruba",
+    "AX": "\u00c5land Islands",
+    "AZ": "Azerbaijan",
+    "BA": "Bosnia & Herzegovina",
+    "BB": "Barbados",
+    "BD": "Bangladesh",
+    "BE": "Belgium",
+    "BF": "Burkina Faso",
+    "BG": "Bulgaria",
+    "BH": "Bahrain",
+    "BI": "Burundi",
+    "BJ": "Benin",
+    "BL": "St. Barth\u00e9lemy",
+    "BM": "Bermuda",
+    "BN": "Brunei",
+    "BO": "Bolivia",
+    "BQ": "Caribbean Netherlands",
+    "BR": "Brazil",
+    "BS": "Bahamas",
+    "BT": "Bhutan",
+    "BV": "Bouvet Island",
+    "BW": "Botswana",
+    "BY": "Belarus",
+    "BZ": "Belize",
+    "CA": "Canada",
+    "CC": "Cocos (Keeling) Islands",
+    "CD": "Congo - Kinshasa",
+    "CF": "Central African Republic",
+    "CG": "Congo - Brazzaville",
+    "CH": "Switzerland",
+    "CI": "C\u00f4te d\u2019Ivoire",
+    "CK": "Cook Islands",
+    "CL": "Chile",
+    "CM": "Cameroon",
+    "CN": "China",
+    "CO": "Colombia",
+    "CR": "Costa Rica",
+    "CU": "Cuba",
+    "CV": "Cape Verde",
+    "CW": "Cura\u00e7ao",
+    "CX": "Christmas Island",
+    "CY": "Cyprus",
+    "CZ": "Czechia",
+    "DE": "Germany",
+    "DJ": "Djibouti",
+    "DK": "Denmark",
+    "DM": "Dominica",
+    "DO": "Dominican Republic",
+    "DZ": "Algeria",
+    "EC": "Ecuador",
+    "EE": "Estonia",
+    "EG": "Egypt",
+    "EH": "Western Sahara",
+    "ER": "Eritrea",
+    "ES": "Spain",
+    "ET": "Ethiopia",
+    "FI": "Finland",
+    "FJ": "Fiji",
+    "FK": "Falkland Islands",
+    "FM": "Micronesia",
+    "FO": "Faroe Islands",
+    "FR": "France",
+    "GA": "Gabon",
+    "GB": "United Kingdom",
+    "GD": "Grenada",
+    "GE": "Georgia",
+    "GF": "French Guiana",
+    "GG": "Guernsey",
+    "GH": "Ghana",
+    "GI": "Gibraltar",
+    "GL": "Greenland",
+    "GM": "Gambia",
+    "GN": "Guinea",
+    "GP": "Guadeloupe",
+    "GQ": "Equatorial Guinea",
+    "GR": "Greece",
+    "GS": "South Georgia & South Sandwich Islands",
+    "GT": "Guatemala",
+    "GU": "Guam",
+    "GW": "Guinea-Bissau",
+    "GY": "Guyana",
+    "HK": "Hong Kong SAR China",
+    "HM": "Heard & McDonald Islands",
+    "HN": "Honduras",
+    "HR": "Croatia",
+    "HT": "Haiti",
+    "HU": "Hungary",
+    "ID": "Indonesia",
+    "IE": "Ireland",
+    "IL": "Israel",
+    "IM": "Isle of Man",
+    "IN": "India",
+    "IO": "British Indian Ocean Territory",
+    "IQ": "Iraq",
+    "IR": "Iran",
+    "IS": "Iceland",
+    "IT": "Italy",
+    "JE": "Jersey",
+    "JM": "Jamaica",
+    "JO": "Jordan",
+    "JP": "Japan",
+    "KE": "Kenya",
+    "KG": "Kyrgyzstan",
+    "KH": "Cambodia",
+    "KI": "Kiribati",
+    "KM": "Comoros",
+    "KN": "St. Kitts & Nevis",
+    "KP": "North Korea",
+    "KR": "South Korea",
+    "KW": "Kuwait",
+    "KY": "Cayman Islands",
+    "KZ": "Kazakhstan",
+    "LA": "Laos",
+    "LB": "Lebanon",
+    "LC": "St. Lucia",
+    "LI": "Liechtenstein",
+    "LK": "Sri Lanka",
+    "LR": "Liberia",
+    "LS": "Lesotho",
+    "LT": "Lithuania",
+    "LU": "Luxembourg",
+    "LV": "Latvia",
+    "LY": "Libya",
+    "MA": "Morocco",
+    "MC": "Monaco",
+    "MD": "Moldova",
+    "ME": "Montenegro",
+    "MF": "St. Martin",
+    "MG": "Madagascar",
+    "MH": "Marshall Islands",
+    "MK": "North Macedonia",
+    "ML": "Mali",
+    "MM": "Myanmar (Burma)",
+    "MN": "Mongolia",
+    "MO": "Macao SAR China",
+    "MP": "Northern Mariana Islands",
+    "MQ": "Martinique",
+    "MR": "Mauritania",
+    "MS": "Montserrat",
+    "MT": "Malta",
+    "MU": "Mauritius",
+    "MV": "Maldives",
+    "MW": "Malawi",
+    "MX": "Mexico",
+    "MY": "Malaysia",
+    "MZ": "Mozambique",
+    "NA": "Namibia",
+    "NC": "New Caledonia",
+    "NE": "Niger",
+    "NF": "Norfolk Island",
+    "NG": "Nigeria",
+    "NI": "Nicaragua",
+    "NL": "Netherlands",
+    "NO": "Norway",
+    "NP": "Nepal",
+    "NR": "Nauru",
+    "NU": "Niue",
+    "NZ": "New Zealand",
+    "OM": "Oman",
+    "PA": "Panama",
+    "PE": "Peru",
+    "PF": "French Polynesia",
+    "PG": "Papua New Guinea",
+    "PH": "Philippines",
+    "PK": "Pakistan",
+    "PL": "Poland",
+    "PM": "St. Pierre & Miquelon",
+    "PN": "Pitcairn Islands",
+    "PR": "Puerto Rico",
+    "PS": "Palestinian Territories",
+    "PT": "Portugal",
+    "PW": "Palau",
+    "PY": "Paraguay",
+    "QA": "Qatar",
+    "RE": "R\u00e9union",
+    "RO": "Romania",
+    "RS": "Serbia",
+    "RU": "Russia",
+    "RW": "Rwanda",
+    "SA": "Saudi Arabia",
+    "SB": "Solomon Islands",
+    "SC": "Seychelles",
+    "SD": "Sudan",
+    "SE": "Sweden",
+    "SG": "Singapore",
+    "SH": "St. Helena",
+    "SI": "Slovenia",
+    "SJ": "Svalbard & Jan Mayen",
+    "SK": "Slovakia",
+    "SL": "Sierra Leone",
+    "SM": "San Marino",
+    "SN": "Senegal",
+    "SO": "Somalia",
+    "SR": "Suriname",
+    "SS": "South Sudan",
+    "ST": "S\u00e3o Tom\u00e9 & Pr\u00edncipe",
+    "SV": "El Salvador",
+    "SX": "Sint Maarten",
+    "SY": "Syria",
+    "SZ": "Eswatini",
+    "TC": "Turks & Caicos Islands",
+    "TD": "Chad",
+    "TF": "French Southern Territories",
+    "TG": "Togo",
+    "TH": "Thailand",
+    "TJ": "Tajikistan",
+    "TK": "Tokelau",
+    "TL": "Timor-Leste",
+    "TM": "Turkmenistan",
+    "TN": "Tunisia",
+    "TO": "Tonga",
+    "TR": "T\u00fcrkiye",
+    "TT": "Trinidad & Tobago",
+    "TV": "Tuvalu",
+    "TW": "Taiwan",
+    "TZ": "Tanzania",
+    "UA": "Ukraine",
+    "UG": "Uganda",
+    "UM": "U.S. Outlying Islands",
+    "US": "United States",
+    "UY": "Uruguay",
+    "UZ": "Uzbekistan",
+    "VA": "Vatican City",
+    "VC": "St. Vincent & Grenadines",
+    "VE": "Venezuela",
+    "VG": "British Virgin Islands",
+    "VI": "U.S. Virgin Islands",
+    "VN": "Vietnam",
+    "VU": "Vanuatu",
+    "WF": "Wallis & Futuna",
+    "WS": "Samoa",
+    "YE": "Yemen",
+    "YT": "Mayotte",
+    "ZA": "South Africa",
+    "ZM": "Zambia",
+    "ZW": "Zimbabwe"
+}
+
+
+# Japan prefectures: ISO 3166-2:JP / government prefecture order 01-47.
+# https://www.stat.go.jp/english/data/kokusei/2020/summary/pdf/all.pdf
+JAPAN_REGIONS = tuple(('JP-{0:02d}'.format(i+1), name) for i, name in enumerate(
+    ('Hokkaido Aomori Iwate Miyagi Akita Yamagata Fukushima Ibaraki Tochigi Gunma '
+     'Saitama Chiba Tokyo Kanagawa Niigata Toyama Ishikawa Fukui Yamanashi Nagano '
+     'Gifu Shizuoka Aichi Mie Shiga Kyoto Osaka Hyogo Nara Wakayama Tottori Shimane '
+     'Okayama Hiroshima Yamaguchi Tokushima Kagawa Ehime Kochi Fukuoka Saga '
+     'Nagasaki Kumamoto Oita Miyazaki Kagoshima Okinawa').split()))
+REGION_CHOICES = {'JP': JAPAN_REGIONS}
+JAPAN_REGION_LABELS = dict(JAPAN_REGIONS)
+JAPAN_REGION_ALIASES = {label.upper():code for code,label in JAPAN_REGIONS}
+JAPAN_REGION_ALIASES.update({'GUMMA':'JP-10'})
+
+
+def country_label(code):
+    return COUNTRY_LABELS.get(code, 'Choose country' if not code else 'Saved country')
+
+
+def canonical_region(country, value):
+    if country != 'JP':
+        return value
+    if value in JAPAN_REGION_LABELS:
+        return value
+    alias = value.upper().replace(' PREFECTURE','').replace('-KEN','')
+    return JAPAN_REGION_ALIASES.get(alias, value)
+
+
+def region_label(country, value):
+    if not value or value == '-':
+        return ''
+    if country == 'JP':
+        known = JAPAN_REGION_LABELS.get(canonical_region(country,value))
+        if known:
+            return known
+        if re.match(r'^JP-[0-9]+\Z',value):
+            return 'Saved region'
+    return value.replace('_',' ').title()
+
+
+def area_label(country, region):
+    if not country:
+        return ''
+    area = region_label(country,region)
+    return country_label(country) + (' / '+area if area else '')
+
+def studio_folder_status(enabled, folder, cancelled=None):
+    """Explicit read-only availability/permission probe; never scans or writes."""
+    cancelled = cancelled or (lambda: False)
+    if not enabled or cancelled():
+        return dict(status='Offline')
+    try:
+        if not os.path.isabs(folder) or not os.path.isdir(folder):
+            return dict(status='Error: folder unavailable')
+        if cancelled():
+            return dict(status='Offline')
+        if not os.access(folder,os.R_OK):
+            return dict(status='Error: no read permission')
+        if cancelled():
+            return dict(status='Offline')
+        return dict(status='Available' if os.access(folder,os.W_OK) else 'Read only')
+    except (IOError,OSError,ValueError):
+        return dict(status='Error: folder unavailable')
+
 
 class StudioRanking(object):
     """Trust-based PB files. Disabled operations do not inspect the filesystem."""
@@ -1062,73 +1429,6 @@ def run_ranking_io(operation, receiver=None):
     return worker
 
 
-class SettingsDialog(QtWidgets.QDialog):
-    def __init__(self, panel):
-        QtWidgets.QDialog.__init__(self, panel)
-        self.panel = panel
-        self.setWindowTitle('NUKERIS SETTINGS')
-        form = QtWidgets.QFormLayout(self)
-        self.grid = QtWidgets.QCheckBox('Node Graph grid')
-        self.grid.setChecked(panel.preferences['grid'])
-        self.studio = QtWidgets.QCheckBox('Enable Studio shared-folder ranking')
-        self.studio.setChecked(panel.preferences['studio_enabled'])
-        self.folder = QtWidgets.QLineEdit(panel.preferences['studio_folder'])
-        self.online = QtWidgets.QCheckBox('Enable Global online ranking (HTTPS)')
-        self.online.setChecked(panel.preferences['global_enabled'])
-        profile = panel.preferences['profile']
-        self.nickname = QtWidgets.QLineEdit(profile.get('nickname',''))
-        self.nickname.setMaxLength(16)
-        self.country = QtWidgets.QComboBox()
-        self.country.addItems([''] + COUNTRY_CODES)
-        self.country.setCurrentIndex(max(0,self.country.findText(profile.get('country',''))))
-        self.region = QtWidgets.QLineEdit(profile.get('region',''))
-        self.region.setMaxLength(32)
-        note = QtWidgets.QLabel('Ranking shares your nickname, manually selected area and result.\n'
-                                'No email, account, location lookup or Nuke project data.\n'
-                                'Studio uses only the folder you enter and existing OS permissions.\n'
-                                'Turning Global on alone sends no request. Use ranking actions to connect.')
-        note.setWordWrap(True)
-        form.addRow(note)
-        form.addRow(self.grid)
-        form.addRow(self.studio)
-        form.addRow('Studio folder',self.folder)
-        form.addRow(self.online)
-        form.addRow('Public nickname',self.nickname)
-        form.addRow('Country (manual)',self.country)
-        form.addRow('Region / Prefecture (manual)',self.region)
-        self.message = QtWidgets.QLabel('Nickname: 2-16 letters, numbers, _, - or .')
-        self.message.setWordWrap(True)
-        form.addRow(self.message)
-        save = QtWidgets.QPushButton('SAVE')
-        save.clicked.connect(self.save)
-        form.addRow(save)
-
-    def save(self):
-        profile = dict(nickname=self.nickname.text().strip(),country=self.country.currentText(),
-                       region=self.region.text().strip().upper())
-        if (self.studio.isChecked() or self.online.isChecked()) and not validate_profile(profile):
-            self.message.setText('Enter a valid nickname, country and region (A-Z, 0-9, space, _, - or .).')
-            return
-        folder = self.folder.text().strip()
-        if self.studio.isChecked() and not os.path.isabs(folder):
-            self.message.setText('Enter the absolute Studio folder path.')
-            return
-        values = dict(grid=self.grid.isChecked(), studio_enabled=self.studio.isChecked(),
-                      global_enabled=self.online.isChecked(), studio_folder=folder, profile=profile)
-        if self.studio.isChecked() and not self.panel.preferences['studio_player_id']:
-            values['studio_player_id'] = uuid.uuid4().hex
-        if not self.panel.settings.save_preferences(values):
-            self.message.setText(self.panel.settings.last_error)
-            return
-        self.panel.preferences = self.panel.settings.read()
-        self.panel._studio_cancel.set()
-        self.panel._studio_cancel = threading.Event()
-        self.panel._grid_checkbox.setChecked(values['grid'])
-        if hasattr(self.panel, 'network'):
-            self.panel.network.configure(values['global_enabled'])
-        self.accept()
-
-
 class RankingDialog(QtWidgets.QDialog):
     def __init__(self, panel):
         QtWidgets.QDialog.__init__(self, panel)
@@ -1219,10 +1519,275 @@ class RankingDialog(QtWidgets.QDialog):
         for i, row in enumerate(entries):
             value = format_milliseconds(row['time_ms']) if row['mode']==SPRINT else '{0:,}'.format(row['score'])
             for j, text in enumerate((str(i+1), row.get('nickname',''),
-                                      row.get('country','')+' / '+row.get('region',''), value)):
+                                      area_label(row.get('country',''),row.get('region','')), value)):
                 self.table.setItem(i,j,QtWidgets.QTableWidgetItem(text))
         self.table.resizeColumnsToContents()
         self.status.setText(response.get('message') or ('' if entries else 'NO SCORES YET\nSet the first record.'))
+
+
+class PrivacyDialog(QtWidgets.QDialog):
+    def __init__(self, parent=None):
+        QtWidgets.QDialog.__init__(self,parent)
+        self.setWindowTitle('PRIVACY & NETWORK INFO')
+        self.resize(520,390)
+        layout = QtWidgets.QVBoxLayout(self)
+        info = QtWidgets.QTextBrowser()
+        info.setOpenExternalLinks(False)
+        info.setPlainText(
+            'OFFLINE BY DEFAULT\n'
+            'Installing, importing or opening NUKERIS starts no network request. '
+            'Studio and Global are off in fresh settings.\n\n'
+            'No telemetry, analytics, LAN discovery, listening ports, background '
+            'services, automatic updates or automatic geolocation.\n\n'
+            'NUKE ISOLATION\n'
+            'NUKERIS does not inspect or send Nuke scripts, nodes, knobs, paths, '
+            'project data, frames, Viewer, account or license information. '
+            'It does not change your comp or Undo stack.\n\n'
+            'STUDIO\n'
+            'Only your explicitly selected shared folder is accessed after opt-in. '
+            'Existing OS permissions are used; no NAS password is stored. '
+            'TEST checks reported permissions without writing a score. '
+            'An OS file operation already in progress may finish after disabling.\n\n'
+            'GLOBAL\n'
+            'After opt-in, explicit ranking actions and enabled challenge runs use '
+            'asynchronous HTTPS. Enabling Global alone sends no request. '
+            'Only the public profile, player/run credentials and required ranking '
+            'results, mode, ruleset and NUKERIS version are sent. '
+            'Country and region are chosen manually.\n\n'
+            'Your player token is private and stored in local settings. Do not share '
+            'that file. Personal results remain independent of external failures.')
+        layout.addWidget(info)
+        close = QtWidgets.QPushButton('CLOSE')
+        close.clicked.connect(self.accept)
+        layout.addWidget(close)
+
+
+class SettingsDialog(QtWidgets.QDialog):
+    def __init__(self, panel):
+        QtWidgets.QDialog.__init__(self,panel)
+        self.panel = panel
+        self.setWindowTitle('NUKERIS SETTINGS')
+        self.resize(490,560)
+        self._test_cancel = threading.Event()
+        self._test_serial = 0
+        self._testing = False
+        self._profile = dict(panel.preferences['profile'])
+        self._country_code = self._profile.get('country','')
+        self._regions = {self._country_code:self._profile.get('region','')}
+        layout = QtWidgets.QVBoxLayout(self)
+        scroll = QtWidgets.QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(_enum_value(QtWidgets.QFrame,'Shape','NoFrame'))
+        content = QtWidgets.QWidget()
+        sections = QtWidgets.QVBoxLayout(content)
+        sections.setContentsMargins(0,0,4,0)
+        scroll.setWidget(content)
+        layout.addWidget(scroll)
+
+        def section(title):
+            group = QtWidgets.QGroupBox(title)
+            form = QtWidgets.QFormLayout(group)
+            form.setFieldGrowthPolicy(_enum_value(QtWidgets.QFormLayout,'FieldGrowthPolicy','AllNonFixedFieldsGrow'))
+            sections.addWidget(group)
+            return form
+
+        display = section('DISPLAY')
+        self.grid = QtWidgets.QCheckBox('Node Graph grid')
+        self.grid.setChecked(panel.preferences['grid'])
+        display.addRow(self.grid)
+
+        studio = section('STUDIO RANKING')
+        self.studio = QtWidgets.QCheckBox('Enable Studio Ranking')
+        self.studio.setChecked(panel.preferences['studio_enabled'])
+        self.folder = QtWidgets.QLineEdit(panel.preferences['studio_folder'])
+        self.folder.setPlaceholderText('Absolute shared folder path')
+        self.test = QtWidgets.QPushButton('TEST')
+        self.test.setMaximumWidth(66)
+        self.test.setToolTip('Check availability and reported read/write permissions. No score or test file is written.')
+        self.studio_status = QtWidgets.QLabel('Not tested' if self.studio.isChecked() else 'Offline')
+        test_row = QtWidgets.QHBoxLayout()
+        test_row.addWidget(self.test)
+        test_row.addWidget(self.studio_status,1)
+        studio.addRow(self.studio)
+        studio.addRow('Shared folder',self.folder)
+        studio.addRow(test_row)
+
+        global_form = section('GLOBAL RANKING')
+        self.online = QtWidgets.QCheckBox('Enable Global Ranking')
+        self.online.setChecked(panel.preferences['global_enabled'])
+        self.nickname = QtWidgets.QLineEdit(self._profile.get('nickname',''))
+        self.nickname.setMaxLength(16)
+        self.nickname.setToolTip('2-16 letters, numbers, underscore, hyphen or dot.')
+        self.country = QtWidgets.QComboBox()
+        self.country.addItem('Choose country','')
+        for code in sorted(COUNTRY_CODES,key=lambda c:country_label(c)):
+            self.country.addItem(country_label(code),code)
+        self.country.setCurrentIndex(max(0,self.country.findData(self._country_code)))
+        self.region = QtWidgets.QComboBox()
+        self.region.setInsertPolicy(_enum_value(QtWidgets.QComboBox,'InsertPolicy','NoInsert'))
+        self.region_hint = QtWidgets.QLabel()
+        self.region_hint.setWordWrap(True)
+        self._populate_regions()
+        global_form.addRow(self.online)
+        shared_profile = QtWidgets.QLabel('Public profile used by Studio and Global.')
+        global_form.addRow(shared_profile)
+        global_form.addRow('Nickname',self.nickname)
+        global_form.addRow('Country',self.country)
+        global_form.addRow('Region / Prefecture',self.region)
+        global_form.addRow(self.region_hint)
+
+        network = section('NETWORK')
+        self.network_status = QtWidgets.QLabel()
+        self.network_status.setWordWrap(True)
+        network.addRow(self.network_status)
+        sections.addStretch(1)
+        self.message = QtWidgets.QLabel('Changes apply on SAVE. TEST uses the selected Studio folder only.')
+        self.message.setWordWrap(True)
+        layout.addWidget(self.message)
+        buttons = QtWidgets.QHBoxLayout()
+        self.privacy_button = QtWidgets.QPushButton('PRIVACY & NETWORK INFO')
+        self.privacy_button.setFlat(True)
+        self.privacy_button.clicked.connect(self.show_privacy)
+        buttons.addWidget(self.privacy_button)
+        buttons.addStretch(1)
+        cancel = QtWidgets.QPushButton('CANCEL')
+        cancel.clicked.connect(self.reject)
+        buttons.addWidget(cancel)
+        self.save_button = QtWidgets.QPushButton('SAVE')
+        self.save_button.clicked.connect(self.save)
+        buttons.addWidget(self.save_button)
+        layout.addLayout(buttons)
+        self.test.clicked.connect(self.test_folder)
+        self.studio.toggled.connect(self._studio_changed)
+        self.online.toggled.connect(self._sync_enabled)
+        self.folder.textChanged.connect(self._studio_changed)
+        self.country.currentIndexChanged.connect(self._country_changed)
+        self.finished.connect(self._cancel_test)
+        self._sync_enabled()
+
+    def _region_code(self):
+        if self.region.isEditable():
+            text = self.region.currentText().strip()
+            stored = self._regions.get(self._country_code,'')
+            if text == region_label(self._country_code,stored):
+                return stored or '-'
+            return text.upper() or '-'
+        return self.region.currentData() or ''
+
+    def _populate_regions(self):
+        country = self._country_code
+        stored = self._regions.get(country,'')
+        self.region.clear()
+        choices = REGION_CHOICES.get(country)
+        self.region.setEditable(not bool(choices))
+        if choices:
+            self.region.addItem('Choose prefecture','')
+            canonical = canonical_region(country,stored)
+            selected = 0
+            for code,label in choices:
+                self.region.addItem(label,stored if code == canonical and stored else code)
+                if code == canonical:
+                    selected = self.region.count()-1
+            if stored and not selected:
+                self.region.addItem(region_label(country,stored) or 'Saved region',stored)
+                selected = self.region.count()-1
+            self.region.setCurrentIndex(selected)
+            self.region_hint.setText('Choose a prefecture. Your saved value is kept until you change it.')
+        else:
+            self.region.lineEdit().setMaxLength(32)
+            self.region.lineEdit().setPlaceholderText('Optional region name')
+            self.region.setEditText(region_label(country,stored))
+            self.region_hint.setText('Optional region name; no bundled list for this country.' if country else 'Choose a country to see available regions.')
+            self.region.setToolTip('Optional name: letters, numbers, spaces, _, - or .')
+
+    def _country_changed(self, _index):
+        self._regions[self._country_code] = self._region_code()
+        self._country_code = self.country.currentData() or ''
+        self._populate_regions()
+
+    def _sync_enabled(self, *_args):
+        studio, online = self.studio.isChecked(), self.online.isChecked()
+        self.folder.setEnabled(studio)
+        self.test.setEnabled(studio and not self._testing and bool(self.folder.text().strip()))
+        for field in (self.nickname,self.country,self.region):
+            field.setEnabled(studio or online)
+        if studio and online:
+            text = 'Studio shared-folder ranking and Global ranking via HTTPS are enabled.'
+        elif studio:
+            text = 'Studio shared-folder ranking enabled.\nGlobal network access is disabled.'
+        elif online:
+            text = 'Global ranking enabled via HTTPS.\nStudio shared-folder access is disabled.'
+        else:
+            text = 'Offline\nNo network connections or shared-folder access while both rankings are disabled.'
+        self.network_status.setText(text)
+
+    def _cancel_test(self, *_args):
+        self._test_cancel.set()
+        self._test_serial += 1
+
+    def _studio_changed(self, *_args):
+        self._cancel_test()
+        self._testing = False
+        self.studio_status.setText('Not tested' if self.studio.isChecked() else 'Offline')
+        self._sync_enabled()
+
+    def test_folder(self):
+        if not self.studio.isChecked() or self._testing:
+            return
+        folder = self.folder.text().strip()
+        if not os.path.isabs(folder):
+            self.studio_status.setText('Error: absolute path required')
+            return
+        self._cancel_test()
+        self._test_cancel = threading.Event()
+        cancel = self._test_cancel
+        serial = self._test_serial
+        self._testing = True
+        self.studio_status.setText('Checking...')
+        self._sync_enabled()
+        def operation():
+            return dict(serial=serial, result=studio_folder_status(True,folder,cancel.is_set))
+        run_ranking_io(operation,self._test_finished)
+
+    @QtCore.Slot(object)
+    def _test_finished(self, response):
+        if response.get('serial',self._test_serial) != self._test_serial:
+            return
+        self._testing = False
+        self.studio_status.setText(response.get('result',{}).get('status','Error: another Studio operation is pending'))
+        self._sync_enabled()
+
+    def show_privacy(self):
+        dialog = PrivacyDialog(self)
+        (getattr(dialog,'exec',None) or dialog.exec_)()
+
+    def save(self):
+        profile = dict(self._profile)
+        nickname = self.nickname.text().strip()
+        country = self.country.currentData() or ''
+        region = self._region_code()
+        if nickname or country or self._profile:
+            profile.update(nickname=nickname,country=country,region=region)
+        if (self.studio.isChecked() or self.online.isChecked() or profile) and not validate_profile(profile):
+            self.message.setText('Choose a country, a valid nickname and a prefecture (Japan). Region text must use A-Z, 0-9, space, _, - or .')
+            return
+        folder = self.folder.text().strip()
+        if self.studio.isChecked() and not os.path.isabs(folder):
+            self.message.setText('Enter the absolute Studio folder path.')
+            return
+        values = dict(grid=self.grid.isChecked(), studio_enabled=self.studio.isChecked(),
+                      global_enabled=self.online.isChecked(), studio_folder=folder, profile=profile)
+        if self.studio.isChecked() and not self.panel.preferences['studio_player_id']:
+            values['studio_player_id'] = uuid.uuid4().hex
+        if not self.panel.settings.save_preferences(values):
+            self.message.setText(self.panel.settings.last_error)
+            return
+        self.panel.preferences = self.panel.settings.read()
+        self.panel._studio_cancel.set()
+        self.panel._studio_cancel = threading.Event()
+        self.panel._grid_checkbox.setChecked(values['grid'])
+        self.panel.network.configure(values['global_enabled'])
+        self.accept()
 
 
 class NukerisPanel(QtWidgets.QWidget):
@@ -1234,6 +1799,8 @@ class NukerisPanel(QtWidgets.QWidget):
         self.setFocusPolicy(QC.StrongFocus)
         self.setMouseTracking(True)
         self.setMinimumSize(360, 600)
+        self._font_cache = {}
+        self._label_cache = {}
 
         self.settings = SettingsStore()
         self.preferences = self.settings.read()
@@ -1276,7 +1843,7 @@ class NukerisPanel(QtWidgets.QWidget):
         self._grid_checkbox.setFocusPolicy(QC.NoFocus)
         self._grid_checkbox.setCursor(QC.PointingHandCursor)
         self._grid_checkbox.setToolTip(
-            "Show a Nuke-style dotted grid aligned exactly to the one-cell movement step."
+            "Show Node Graph guide dots and sparse major guides. Display only."
         )
         self._grid_checkbox.toggled.connect(self._grid_changed)
 
@@ -1284,12 +1851,17 @@ class NukerisPanel(QtWidgets.QWidget):
         self._mode_combo.addItems(MODE_LABELS)
         self._mode_combo.setFocusPolicy(QC.NoFocus)
         self._mode_combo.setToolTip('Select a mode, then start a new game.')
-        self._ranking_button = QtWidgets.QPushButton('RANKING', self)
+        self._ranking_button = QtWidgets.QToolButton(self)
+        self._ranking_button.setText('RANKING')
+        self._ranking_button.setAutoRaise(True)
         self._ranking_button.setFocusPolicy(QC.NoFocus)
         self._ranking_button.clicked.connect(self._show_ranking)
-        self._settings_button = QtWidgets.QPushButton('SETTINGS', self)
+        self._settings_button = QtWidgets.QToolButton(self)
+        self._settings_button.setText('SETTINGS')
+        self._settings_button.setAutoRaise(True)
         self._settings_button.setFocusPolicy(QC.NoFocus)
         self._settings_button.clicked.connect(self._show_settings)
+        self._mode_combo.currentIndexChanged.connect(lambda _index: self.update())
         self._apply_button_style()
 
     # ---------- Palette / Nuke look ----------
@@ -1374,6 +1946,10 @@ class NukerisPanel(QtWidgets.QWidget):
             )
 
     def changeEvent(self, event) :
+        if event.type() in (_enum_value(QtCore.QEvent, 'Type', 'FontChange'),
+                            _enum_value(QtCore.QEvent, 'Type', 'ApplicationFontChange')):
+            self._font_cache.clear()
+            self._label_cache.clear()
         if event.type() in (
             QC.PaletteChange,
             QC.ApplicationPaletteChange,
@@ -1390,7 +1966,7 @@ class NukerisPanel(QtWidgets.QWidget):
 
         # GAME follows the board instead of being pinned to the bottom of a tall pane.
         # This removes large dead zones while keeping all real widgets inside the viewport.
-        game_y = board_bottom + (28.0 if layout["compact"] else 16.0)
+        game_y = board_bottom + (44.0 if layout["compact"] else 12.0)
         button_y = game_y + 21.0
         button_w = min(132.0, max(92.0, w - 2.0 * margin))
         button_x = margin
@@ -1399,12 +1975,10 @@ class NukerisPanel(QtWidgets.QWidget):
         )
 
         checkbox_w = min(190.0, max(132.0, w - 2.0 * margin))
-        self._grid_checkbox.setGeometry(
-            int(round(margin)), int(round(button_y + 35.0)), int(round(checkbox_w)), 24
-        )
-        self._ranking_button.setGeometry(int(margin+button_w+8), int(button_y), 100, 28)
-        self._settings_button.setGeometry(int(margin+button_w+114), int(button_y), 92, 28)
-        self._mode_combo.setGeometry(12, 54, min(220, int(w)-140), 26)
+        self._grid_checkbox.setGeometry(int(margin+button_w+12), int(button_y+2), int(checkbox_w), 24)
+        self._ranking_button.setGeometry(int(w)-164, 10, 74, 24)
+        self._settings_button.setGeometry(int(w)-88, 10, 76, 24)
+        self._mode_combo.setGeometry(12, 50, min(220, int(w)-140), 26)
         QtWidgets.QWidget.resizeEvent(self, event)
 
     # ---------- Lifecycle / safety ----------
@@ -1543,6 +2117,21 @@ class NukerisPanel(QtWidgets.QWidget):
     }
 
     def event(self, event) :
+        if event.type() == _enum_value(QtCore.QEvent, 'Type', 'ToolTip'):
+            layout = panel_layout(self.width(), self.height())
+            bx, by, bw, bh = layout['board']
+            pos = event.pos()
+            if bx <= pos.x() < bx+bw and by <= pos.y() < by+bh:
+                x, y = int((pos.x()-bx)/layout['cell']), int((pos.y()-by)/layout['cell'])
+                placed = self.engine.board[y][x]
+                kind = placed.kind if placed else None
+                if self.engine.active and (x,y) in self.engine.active.cells():
+                    kind = self.engine.active.kind
+                if kind:
+                    QtWidgets.QToolTip.showText(event.globalPos(), NODE_STYLES[kind]['label'], self)
+                    return True
+            event.accept()
+            return True
         # Nuke has single-key QAction shortcuts (S, D, etc.) that are resolved before
         # QWidget.keyPressEvent(). ShortcutOverride is Qt's local mechanism for a focused
         # widget to say "I own this key" without installing a global event filter or
@@ -1741,13 +2330,14 @@ class NukerisPanel(QtWidgets.QWidget):
 
     # ---------- Painting ----------
 
-    @staticmethod
-    def _font(size, weight=QC.FontNormal) :
-        app = QtWidgets.QApplication.instance()
-        f = QtGui.QFont(app.font() if app is not None else QtGui.QFont())
-        f.setPixelSize(max(8, int(size)))
-        f.setWeight(weight)
-        return f
+    def _font(self, size, weight=QC.FontNormal) :
+        key = (max(8, int(size)), weight)
+        if key not in self._font_cache:
+            f = QtGui.QFont(self.font())
+            f.setPixelSize(key[0])
+            f.setWeight(weight)
+            self._font_cache[key] = f
+        return self._font_cache[key]
 
     def paintEvent(self, event) :
         # Do not allow Python exceptions to escape a Qt paint callback inside Nuke.
@@ -1798,7 +2388,7 @@ class NukerisPanel(QtWidgets.QWidget):
                      t) :
         # Properties-style node-name field: shallow inset with a soft top-light vertical
         # gradient. No heavy left shadow; the lighting reads as coming from above.
-        title_h = 48.0
+        title_h = 42.0
         p.fillRect(QtCore.QRectF(0.0, 0.0, width, title_h), t["titlebar"])
 
         accent = self._mix(t["highlight"], t["text"], 0.10)
@@ -1806,8 +2396,8 @@ class NukerisPanel(QtWidgets.QWidget):
         p.setBrush(accent)
         p.drawRect(QtCore.QRectF(0.0, 0.0, width, 2.0))
 
-        field_w = max(150.0, width - (2.0 * margin))
-        name_rect = QtCore.QRectF(margin, 8.0, field_w, 34.0)
+        field_w = max(150.0, width - 188.0)
+        name_rect = QtCore.QRectF(margin, 7.0, field_w, 28.0)
         name_base = self._mix(t["base"], t["titlebar"], 0.14)
         grad = QtGui.QLinearGradient(name_rect.topLeft(), name_rect.bottomLeft())
         grad.setColorAt(0.0, self._mix(name_base, QtGui.QColor("#000000"), 0.045))
@@ -1834,7 +2424,7 @@ class NukerisPanel(QtWidgets.QWidget):
             QtCore.QPointF(name_rect.right() - 1.0, name_rect.bottom() - 1.0),
         )
 
-        title_font = self._font(21, QC.FontMedium)
+        title_font = self._font(17, QC.FontMedium)
         p.setFont(title_font)
         p.setPen(t["text"])
         title_text = PANEL_TITLE
@@ -1858,8 +2448,8 @@ class NukerisPanel(QtWidgets.QWidget):
         p.setFont(self._font(13, QC.FontMedium))
         warning = self.session and self.session.mode == SCORE_ATTACK and 0 < 120000-self.session.elapsed_ms <= 10000
         p.setPen(QtGui.QColor('#D5A34B') if warning else t['text'])
-        p.drawText(QtCore.QRectF(width-126, 54, 114, 26), QC.AlignRight | QC.AlignVCenter, self._time_display())
-        if width >= 720:
+        p.drawText(QtCore.QRectF(width-126, 50, 114, 26), QC.AlignRight | QC.AlignVCenter, self._header_time())
+        if width >= 900:
             status = "INPUT ACTIVE" if self.input_active and not self.paused else "INPUT RELEASED"
             p.setPen(t["muted"])
             p.setFont(self._font(10, QC.FontMedium))
@@ -1869,11 +2459,18 @@ class NukerisPanel(QtWidgets.QWidget):
                 status,
             )
 
+    def _display_mode(self):
+        return self.session.mode if self.session else MODES[self._mode_combo.currentIndex()]
+
+    def _header_time(self):
+        return '' if self._display_mode() == NORMAL else self._time_display()
+
     def _time_display(self):
-        if self.session and self.session.mode == SCORE_ATTACK:
-            return format_milliseconds(max(0, 120000-self.session.elapsed_ms))
-        if self.session and self.session.mode == SPRINT:
-            return format_milliseconds(self.session.elapsed_ms)
+        elapsed = self.session.elapsed_ms if self.session else 0
+        if self._display_mode() == SCORE_ATTACK:
+            return format_milliseconds(max(0, 120000-elapsed))[:-2]
+        if self._display_mode() == SPRINT:
+            return format_milliseconds(elapsed)
         return self._format_time(self._active_seconds)
 
     def _draw_board(self, p, rect, cell,
@@ -1946,13 +2543,9 @@ class NukerisPanel(QtWidgets.QWidget):
 
     def _draw_node_graph_grid(self, p, rect, cell,
                               t) :
-        """Draw a Nuke-like dotted grid whose intersections are the node centers.
-
-        One grid interval is exactly one game-cell move. Because node centers are also
-        at (index + 0.5) * cell, every tetromino node lands precisely on a cross point.
-        """
-        grid = self._mix(t["text"], t["board"], 0.54)
-        grid.setAlpha(125)
+        """Sparse workspace guides, without drawing a box around each game cell."""
+        grid = QtGui.QColor('#606060')
+        grid.setAlpha(105)
         pen = QtGui.QPen(grid, 1.0)
         pen.setStyle(QC.DotLine)
         pen.setCapStyle(QC.FlatCap)
@@ -1962,13 +2555,20 @@ class NukerisPanel(QtWidgets.QWidget):
         p.setPen(pen)
         p.setBrush(QC.NoBrush)
 
-        # Vertical and horizontal lines pass through the same centers used by _node_rect.
-        for x in range(BOARD_W):
+        # Major guides span four moves; minor guides are isolated center points.
+        for x in range(0,BOARD_W,4):
             px = rect.left() + (x + 0.5) * cell
             p.drawLine(QtCore.QPointF(px, rect.top()), QtCore.QPointF(px, rect.bottom()))
-        for y in range(BOARD_H):
+        for y in range(0,BOARD_H,4):
             py = rect.top() + (y + 0.5) * cell
             p.drawLine(QtCore.QPointF(rect.left(), py), QtCore.QPointF(rect.right(), py))
+
+        dots = QtGui.QColor('#707070')
+        dots.setAlpha(150)
+        p.setPen(QtGui.QPen(dots,1.0))
+        for x in range(BOARD_W):
+            for y in range(BOARD_H):
+                p.drawPoint(QtCore.QPointF(rect.left()+(x+.5)*cell,rect.top()+(y+.5)*cell))
 
         p.restore()
 
@@ -1976,8 +2576,7 @@ class NukerisPanel(QtWidgets.QWidget):
     def _node_rect(board_rect, cell, x, y) :
         cx = board_rect.left() + (x + 0.5) * cell
         cy = board_rect.top() + (y + 0.5) * cell
-        node_w = max(7.0, cell * 0.78)
-        node_h = max(5.0, cell * 0.46)
+        node_w, node_h = node_dimensions(cell)
         return QtCore.QRectF(cx - node_w * 0.5, cy - node_h * 0.5, node_w, node_h)
 
     @staticmethod
@@ -2015,11 +2614,10 @@ class NukerisPanel(QtWidgets.QWidget):
         start, end = (QtCore.QPointF(*pt) for pt in endpoints)
         color = QtGui.QColor(t['wire'])
         if ghost:
-            color = QtGui.QColor(t['faint'])
-            color.setAlpha(70)
+            color.setAlpha(105)
         elif subtle:
             color.setAlpha(75)
-        pen = QtGui.QPen(color, 1.1 if active else 1.0)
+        pen = QtGui.QPen(color, 1.15)
         if ghost:
             pen.setStyle(QC.DashLine)
         p.setPen(pen)
@@ -2033,8 +2631,8 @@ class NukerisPanel(QtWidgets.QWidget):
         if length < 1.0:
             return
         ux, uy = dx/length, dy/length
-        size = min(max(2.0, cell*.12), length*.65)
-        tip = QtCore.QPointF(end.x()-ux*.4, end.y()-uy*.4)
+        size = min(max(2.8, cell*.15), 5.0, length*.78)
+        tip = QtCore.QPointF(end.x()-ux*.2, end.y()-uy*.2)
         base = QtCore.QPointF(tip.x()-ux*size, tip.y()-uy*size)
         wing = size*.5
         points = [tip, QtCore.QPointF(base.x()-uy*wing, base.y()+ux*wing),
@@ -2116,7 +2714,7 @@ class NukerisPanel(QtWidgets.QWidget):
         p.setBrush(grad)
         border = QtGui.QColor("#141414")
         if active:
-            border = self._mix(border, t["text"], 0.28)
+            border = self._mix(t['highlight'], t['text'], 0.28)
         p.setPen(QtGui.QPen(border, 1.0))
         p.drawRect(r)
 
@@ -2139,34 +2737,43 @@ class NukerisPanel(QtWidgets.QWidget):
 
         if show_label:
             label = style["label"]
-            # The node name is decorative, but never abbreviated or clipped. Scale the
-            # complete word to the node body instead of eliding it at small pane sizes.
+            # Keep text legible; narrow nodes use class abbreviations, with the full
+            # class name available on hover. Never shrink text into unreadable paths.
             text_color = QtGui.QColor("#111111") if base.lightness() >= 82 else QtGui.QColor("#E7E7E7")
-            self._draw_fitted_node_label(p, r.adjusted(2.0, 1.0, -2.0, -1.0), label, text_color)
+            self._draw_fitted_node_label(p, r.adjusted(1.0, .5, -1.0, -.5), label, text_color)
 
     def _draw_fitted_node_label(self, p, rect,
                                 text, color) :
         if rect.width() <= 1.0 or rect.height() <= 1.0 or not text:
             return
-        font = self._font(12, QC.FontMedium)
-        path = QtGui.QPainterPath()
-        path.addText(0.0, 0.0, font, text)
-        bounds = path.boundingRect()
-        if bounds.width() <= 0.0 or bounds.height() <= 0.0:
-            return
-        sx = max(0.02, rect.width() / bounds.width())
-        sy = max(0.02, rect.height() / bounds.height())
-        scale = min(1.0, sx, sy)
-        draw_w = bounds.width() * scale
-        draw_h = bounds.height() * scale
-        tx = rect.center().x() - draw_w * 0.5 - bounds.left() * scale
-        ty = rect.center().y() - draw_h * 0.5 - bounds.top() * scale
+        key = (text, int(rect.width()), int(rect.height()))
+        if key not in self._label_cache:
+            short = {'Transform': ('Xform','Tr'), 'Grade': ('Gr',), 'Merge': ('Mrg','Mg'),
+                     'Read': ('Rd',), 'Write': ('Wr',), 'Blur': ('Bl',), 'Roto': ('Rt',)}
+            choices = (text,) + short.get(text, ())
+            selected = (choices[-1], self._font(8, QC.FontMedium))
+            for label in choices:
+                found = False
+                for size in (11,10,9,8):
+                    font = self._font(size, QC.FontMedium)
+                    metrics = QtGui.QFontMetricsF(font)
+                    if metrics.horizontalAdvance(label) <= rect.width() and metrics.tightBoundingRect(label).height() <= rect.height():
+                        selected, found = (label, font), True
+                        break
+                if found:
+                    break
+            if len(self._label_cache) >= 256:
+                self._label_cache.clear()
+            self._label_cache[key] = selected
+        label, font = self._label_cache[key]
         p.save()
-        p.translate(tx, ty)
-        p.scale(scale, scale)
-        p.setPen(QC.NoPen)
-        p.setBrush(color)
-        p.drawPath(path)
+        p.setClipRect(rect.adjusted(-.5,-.5,.5,.5))
+        p.setFont(font)
+        p.setPen(color)
+        # Qt's line height includes extra leading; center the actual glyphs instead.
+        bounds = QtGui.QFontMetricsF(font).tightBoundingRect(label)
+        p.drawText(QtCore.QPointF(rect.center().x()-bounds.center().x(),
+                                 rect.center().y()-bounds.center().y()), label)
         p.restore()
 
     def _draw_clear_effect(self, p, board, cell,
@@ -2348,17 +2955,10 @@ class NukerisPanel(QtWidgets.QWidget):
         preview_h = min(66.0, max(54.0, board.height() * 0.145))
         self._draw_piece_preview(p, self.engine.hold_kind, left_x, y, side, preview_h, t)
 
-        # STATS — TIME intentionally sits directly beneath LINES.
+        # Normal session time lives here only; challenges use the header clock.
         stats_y = y + preview_h + 7.0
         stats_y = self._draw_section_header(p, left_x, stats_y, side, "STATS", t)
-        rows = [
-            ("score", "{0:,}".format(self.engine.score), True),
-            ("best", "{0:,}".format(self.engine.best_score), False),
-            ("level", "{0:02d}".format(self.engine.level), False),
-            ("lines", "{0:03d}".format(self.engine.lines), False),
-            ("time", self._time_display(), True),
-        ]
-        for label, value, emphasize in rows:
+        for label, value, emphasize in self._stats_rows():
             self._draw_static_row(p, left_x, stats_y, side, label, value, t, emphasize)
             stats_y += 29.0
 
@@ -2370,32 +2970,42 @@ class NukerisPanel(QtWidgets.QWidget):
         # NEXT
         y = self._draw_section_header(p, right_x, top, side, "NEXT", t)
         available = max(160.0, board.bottom() - y)
-        item_h = min(59.0, max(42.0, (available - (NEXT_COUNT - 1) * 5.0) / NEXT_COUNT))
-        for kind in self.engine.next_pieces(NEXT_COUNT):
+        item_h = min(55.0, max(38.0, (available - (NEXT_COUNT - 1) * 4.0) / NEXT_COUNT))
+        for index, kind in enumerate(self.engine.next_pieces(NEXT_COUNT)):
             self._draw_piece_preview(
-                p, kind, right_x, y, side, item_h, t, show_label=False
+                p, kind, right_x+12, y, side-12, item_h, t, show_label=False
             )
-            y += item_h + 3.0
+            p.setFont(self._font(9))
+            p.setPen(t['muted'])
+            p.drawText(QtCore.QRectF(right_x,y,12,item_h), QC.AlignVCenter, str(index+1))
+            y += item_h + 4.0
 
     def _draw_compact_previews(self, p, margin, width, board, t):
         p.setFont(self._font(10, QC.FontMedium))
         p.setPen(t['muted'])
-        p.drawText(QtCore.QRectF(margin, 90, 80, 16), QC.AlignLeft, 'HOLD')
-        p.drawText(QtCore.QRectF(width-192, 90, 180, 16), QC.AlignLeft, 'NEXT')
-        self._draw_piece_preview(p, self.engine.hold_kind, margin, 107, 88, 48, t)
+        p.drawText(QtCore.QRectF(margin, 84, 80, 16), QC.AlignLeft, 'HOLD')
+        p.drawText(QtCore.QRectF(width-192, 84, 180, 16), QC.AlignLeft, 'NEXT')
+        self._draw_piece_preview(p, self.engine.hold_kind, margin, 102, 88, 40, t)
         for i, kind in enumerate(self.engine.next_pieces(3)):
-            self._draw_piece_preview(p, kind, width-192+i*60, 107, 56, 48, t, False)
+            self._draw_piece_preview(p, kind, width-192+i*60, 102, 56, 40, t, False)
+
+    def _stats_rows(self):
+        rows = [('score', '{0:,}'.format(self.engine.score), True),
+                ('best', '{0:,}'.format(self.engine.best_score), False),
+                ('level', str(self.engine.level), False),
+                ('lines', str(self.engine.lines), False)]
+        if self._display_mode() == NORMAL:
+            rows.append(('time', self._time_display(), True))
+        return rows
 
     def _draw_compact_stats(self, p, margin, width,
                             board, t) :
-        # Narrow-pane fallback. Keep LINES immediately followed by TIME in reading order.
-        y = board.bottom() + 2
-        p.setFont(self._font(13, QC.FontMedium))
+        y = board.bottom() + 4
+        p.setFont(self._font(11, QC.FontMedium))
         p.setPen(t["text"])
         text = (
-            "SCORE {0:,}    LV {1:02d}    LINES {2:03d}".format(
-                self.engine.score, self.engine.level, self.engine.lines,
-                self._time_display()
+            "score {0:,}    level {1}    lines {2}".format(
+                self.engine.score, self.engine.level, self.engine.lines
             )
         )
         p.drawText(
@@ -2403,6 +3013,11 @@ class NukerisPanel(QtWidgets.QWidget):
             QC.AlignCenter,
             text,
         )
+        detail = 'best {0:,}'.format(self.engine.best_score)
+        if self._display_mode() == NORMAL:
+            detail += '    time ' + self._time_display()
+        p.setPen(t['muted'])
+        p.drawText(QtCore.QRectF(margin,y+18,width-2*margin,18), QC.AlignCenter, detail)
 
     def _draw_label(self, p, x, y, width,
                     text, t) :
@@ -2419,11 +3034,9 @@ class NukerisPanel(QtWidgets.QWidget):
                             width, height, t,
                             show_label = True) :
         r = QtCore.QRectF(x, y, width, height)
-        preview_t = t
-        if not show_label:
-            preview_t = dict(t)
-            preview_t["soft_border"] = self._mix(t.get("soft_border", t["border"]), t["window"], 0.28)
-        self._draw_group_box(p, r, preview_t)
+        if show_label:
+            # Hold remains a single quiet well; Next is unboxed and ordered by position.
+            p.fillRect(r, self._mix(t['window'], t['base'], .25))
         if not kind:
             p.setPen(t["faint"])
             p.setFont(self._font(9, QC.FontMedium))
@@ -2460,12 +3073,6 @@ class NukerisPanel(QtWidgets.QWidget):
     def _draw_bind(self, p, x, y, keys,
                    icon, label, t) :
         start_x = x
-        p.setPen(t["muted"])
-        p.setFont(self._font(13, QC.FontDemiBold))
-        icon_rect = QtCore.QRectF(x, y, 18, 20)
-        p.drawText(icon_rect, QC.AlignCenter, icon)
-        x += 22
-
         for i, key in enumerate(keys):
             kw = self._draw_keycap(p, x, y, key, t, wide=(key == "SPACE"))
             x += kw
@@ -2485,8 +3092,8 @@ class NukerisPanel(QtWidgets.QWidget):
 
     def _draw_footer(self, p, margin, width, height,
                      board, t) :
-        game_y = board.bottom() + (28.0 if width < 650 else 16.0)
-        controls_y = game_y + 94.0
+        game_y = board.bottom() + (44.0 if width < 650 else 12.0)
+        controls_y = game_y + 56.0
 
         self._draw_section_header(
             p, margin, game_y, width - 2.0 * margin, "GAME", t
@@ -2497,12 +3104,11 @@ class NukerisPanel(QtWidgets.QWidget):
         )
         base_y = controls_y + 24.0
 
-        if width < 500:
+        if width < 650:
             p.setFont(self._font(10, QC.FontNormal))
             p.setPen(t['text'])
             for i, text in enumerate(('A/D MOVE   Q/E ROTATE   C HOLD', 'S DOWN   SPACE/W DROP   ESC PAUSE')):
-                p.drawText(QtCore.QRectF(margin, base_y+i*23, width-2*margin, 20), QC.AlignLeft, text)
-            return
+                p.drawText(QtCore.QRectF(margin, base_y+i*18, width-2*margin, 18), QC.AlignLeft, text)
         rows = [
             [
                 (("A", "D"), "↔", "MOVE"),
@@ -2517,13 +3123,13 @@ class NukerisPanel(QtWidgets.QWidget):
         ]
 
         available = max(1.0, width - 2.0 * margin)
-        for row_index, row in enumerate(rows):
+        for row_index, row in enumerate(rows if width >= 650 else []):
             widths = []
             for keys, icon, label in row:
                 key_w = sum(42.0 if k == "SPACE" else max(22.0, 11.0 + len(k) * 7.0) for k in keys)
                 key_w += max(0, len(keys) - 1) * 3.0
                 label_w = max(42.0, len(label) * 6.3 + 3.0)
-                widths.append(22.0 + key_w + 6.0 + label_w)
+                widths.append(key_w + 6.0 + label_w)
             raw_gap = (available - sum(widths)) / max(1, len(row) - 1)
             gap = max(4.0, min(14.0, raw_gap))
             x = margin + 4.0
@@ -2532,13 +3138,13 @@ class NukerisPanel(QtWidgets.QWidget):
                 self._draw_bind(p, x, y, keys, icon, label, t)
                 x += item_w + gap
 
-        copyright_y = base_y + 53.0
+        copyright_y = base_y + (38.0 if width < 650 else 53.0)
         if copyright_y + 13.0 < height - 2.0:
             p.setPen(t["faint"])
             p.setFont(self._font(9, QC.FontNormal))
             p.drawText(
                 QtCore.QRectF(margin, copyright_y, width - (2.0 * margin), 13.0),
-                QC.AlignRight | QC.AlignVCenter,
+                QC.AlignLeft | QC.AlignVCenter,
                 "© 2026 Kota Mori",
             )
 
@@ -2569,13 +3175,13 @@ class NukerisPanel(QtWidgets.QWidget):
             return
 
         veil = QtGui.QColor(t["board"])
-        veil.setAlpha(224)
+        veil.setAlpha(40 if title == 'PAUSED' else 165)
         p.setPen(QC.NoPen)
         p.setBrush(veil)
         p.drawRoundedRect(board, 2.0, 2.0)
 
         p.setPen(t["text"])
-        p.setFont(self._font(20, QC.FontDemiBold))
+        p.setFont(self._font(16 if title == 'PAUSED' else 20, QC.FontDemiBold))
         center_y = board.center().y() - 40
         p.drawText(
             QtCore.QRectF(board.left(), center_y, board.width(), 28),

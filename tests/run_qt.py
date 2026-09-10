@@ -15,6 +15,14 @@ sys.modules['nuke'] = nuke
 scripts = types.ModuleType('nukescripts')
 scripts.panels = None
 sys.modules['nukescripts'] = scripts
+try:
+    from PySide6 import QtNetwork as guarded_network
+except ImportError:
+    from PySide2 import QtNetwork as guarded_network
+original_manager = guarded_network.QNetworkAccessManager
+def forbid_network_manager(*args,**kwargs):
+    raise AssertionError('Unexpected network manager during import/open/offline UI checks')
+guarded_network.QNetworkAccessManager = forbid_network_manager
 import nukeris
 QtWidgets, QtGui, QtCore = nukeris.QtWidgets, nukeris.QtGui, nukeris.QtCore
 app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
@@ -30,6 +38,7 @@ for role, color in [('Window','#353535'),('WindowText','#D0D0D0'),('Base','#2929
 app.setPalette(palette)
 folder = tempfile.mkdtemp(prefix='nukeris-qt-')
 nukeris.user_settings_path = lambda: os.path.join(folder,'settings.json')
+nukeris._settings_path = lambda: os.path.join(folder,'missing-legacy.json')
 try:
     panel = nukeris.NukerisPanel()
     assert panel.network.transport.manager is None
@@ -84,8 +93,12 @@ try:
     assert not panel.error_text, panel.error_text
     panel.close()
     app.processEvents()
+    from qt_polish_checks import run as polish_checks
+    polish_checks(nukeris,app,folder,sys.argv[2] if len(sys.argv)>2 else None)
+    guarded_network.QNetworkAccessManager = original_manager
     from qt_network_checks import run
     run(nukeris,app)
     print('Qt smoke passed:', nukeris.QT_BINDING, QtCore.qVersion())
 finally:
+    guarded_network.QNetworkAccessManager = original_manager
     shutil.rmtree(folder)

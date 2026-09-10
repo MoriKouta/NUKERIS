@@ -1,3 +1,22 @@
+def studio_folder_status(enabled, folder, cancelled=None):
+    """Explicit read-only availability/permission probe; never scans or writes."""
+    cancelled = cancelled or (lambda: False)
+    if not enabled or cancelled():
+        return dict(status='Offline')
+    try:
+        if not os.path.isabs(folder) or not os.path.isdir(folder):
+            return dict(status='Error: folder unavailable')
+        if cancelled():
+            return dict(status='Offline')
+        if not os.access(folder,os.R_OK):
+            return dict(status='Error: no read permission')
+        if cancelled():
+            return dict(status='Offline')
+        return dict(status='Available' if os.access(folder,os.W_OK) else 'Read only')
+    except (IOError,OSError,ValueError):
+        return dict(status='Error: folder unavailable')
+
+
 class StudioRanking(object):
     """Trust-based PB files. Disabled operations do not inspect the filesystem."""
     def __init__(self, enabled=False, folder='', player_id='', profile=None, cancelled=None):

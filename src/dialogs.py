@@ -40,73 +40,6 @@ def run_ranking_io(operation, receiver=None):
     return worker
 
 
-class SettingsDialog(QtWidgets.QDialog):
-    def __init__(self, panel):
-        QtWidgets.QDialog.__init__(self, panel)
-        self.panel = panel
-        self.setWindowTitle('NUKERIS SETTINGS')
-        form = QtWidgets.QFormLayout(self)
-        self.grid = QtWidgets.QCheckBox('Node Graph grid')
-        self.grid.setChecked(panel.preferences['grid'])
-        self.studio = QtWidgets.QCheckBox('Enable Studio shared-folder ranking')
-        self.studio.setChecked(panel.preferences['studio_enabled'])
-        self.folder = QtWidgets.QLineEdit(panel.preferences['studio_folder'])
-        self.online = QtWidgets.QCheckBox('Enable Global online ranking (HTTPS)')
-        self.online.setChecked(panel.preferences['global_enabled'])
-        profile = panel.preferences['profile']
-        self.nickname = QtWidgets.QLineEdit(profile.get('nickname',''))
-        self.nickname.setMaxLength(16)
-        self.country = QtWidgets.QComboBox()
-        self.country.addItems([''] + COUNTRY_CODES)
-        self.country.setCurrentIndex(max(0,self.country.findText(profile.get('country',''))))
-        self.region = QtWidgets.QLineEdit(profile.get('region',''))
-        self.region.setMaxLength(32)
-        note = QtWidgets.QLabel('Ranking shares your nickname, manually selected area and result.\n'
-                                'No email, account, location lookup or Nuke project data.\n'
-                                'Studio uses only the folder you enter and existing OS permissions.\n'
-                                'Turning Global on alone sends no request. Use ranking actions to connect.')
-        note.setWordWrap(True)
-        form.addRow(note)
-        form.addRow(self.grid)
-        form.addRow(self.studio)
-        form.addRow('Studio folder',self.folder)
-        form.addRow(self.online)
-        form.addRow('Public nickname',self.nickname)
-        form.addRow('Country (manual)',self.country)
-        form.addRow('Region / Prefecture (manual)',self.region)
-        self.message = QtWidgets.QLabel('Nickname: 2-16 letters, numbers, _, - or .')
-        self.message.setWordWrap(True)
-        form.addRow(self.message)
-        save = QtWidgets.QPushButton('SAVE')
-        save.clicked.connect(self.save)
-        form.addRow(save)
-
-    def save(self):
-        profile = dict(nickname=self.nickname.text().strip(),country=self.country.currentText(),
-                       region=self.region.text().strip().upper())
-        if (self.studio.isChecked() or self.online.isChecked()) and not validate_profile(profile):
-            self.message.setText('Enter a valid nickname, country and region (A-Z, 0-9, space, _, - or .).')
-            return
-        folder = self.folder.text().strip()
-        if self.studio.isChecked() and not os.path.isabs(folder):
-            self.message.setText('Enter the absolute Studio folder path.')
-            return
-        values = dict(grid=self.grid.isChecked(), studio_enabled=self.studio.isChecked(),
-                      global_enabled=self.online.isChecked(), studio_folder=folder, profile=profile)
-        if self.studio.isChecked() and not self.panel.preferences['studio_player_id']:
-            values['studio_player_id'] = uuid.uuid4().hex
-        if not self.panel.settings.save_preferences(values):
-            self.message.setText(self.panel.settings.last_error)
-            return
-        self.panel.preferences = self.panel.settings.read()
-        self.panel._studio_cancel.set()
-        self.panel._studio_cancel = threading.Event()
-        self.panel._grid_checkbox.setChecked(values['grid'])
-        if hasattr(self.panel, 'network'):
-            self.panel.network.configure(values['global_enabled'])
-        self.accept()
-
-
 class RankingDialog(QtWidgets.QDialog):
     def __init__(self, panel):
         QtWidgets.QDialog.__init__(self, panel)
@@ -197,7 +130,7 @@ class RankingDialog(QtWidgets.QDialog):
         for i, row in enumerate(entries):
             value = format_milliseconds(row['time_ms']) if row['mode']==SPRINT else '{0:,}'.format(row['score'])
             for j, text in enumerate((str(i+1), row.get('nickname',''),
-                                      row.get('country','')+' / '+row.get('region',''), value)):
+                                      area_label(row.get('country',''),row.get('region','')), value)):
                 self.table.setItem(i,j,QtWidgets.QTableWidgetItem(text))
         self.table.resizeColumnsToContents()
         self.status.setText(response.get('message') or ('' if entries else 'NO SCORES YET\nSet the first record.'))

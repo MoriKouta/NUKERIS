@@ -16,11 +16,11 @@ class GeometryTests(unittest.TestCase):
         self.assertIsNone(core.wire_endpoints((0,0),(1,1),20))
 
     def test_layout_fits_minimum_and_wide_sizes(self):
-        for width,height in ((360,600),(500,700),(650,600),(900,900)):
+        for width,height in ((360,600),(500,700),(649,1200),(650,600),(900,900)):
             m=core.panel_layout(width,height)
             x,y,w,h=m['board']
             self.assertGreaterEqual(x,0)
             self.assertLessEqual(x+w,width)
-            self.assertLessEqual(y+h+190,height)
+            self.assertLessEqual(y+h+(175 if m['compact'] else 158),height)
             self.assertEqual(w/h,.5)
             self.assertEqual(m['compact'],width<650)

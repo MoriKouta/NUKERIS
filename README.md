@@ -40,6 +40,8 @@ Hidden panels stop gameplay timers. Ranked elapsed time is computed independentl
 - Thin highlights, subtle shadows, restrained controls and focus-based keyboard ownership.
 - Resizing does not recreate game state.
 
+The UI Polish pass improves wire/arrow contrast and node height, removes Next preview boxes and keeps Ranking/Settings in the header. Narrow nodes use readable abbreviations with full names on hover. Normal time appears only in STATS; challenge clocks appear only in the header. Grid uses dots/sparse guides, and paused boards stay visible. See [polish details and remaining runtime checks](docs/UI_POLISH.md).
+
 ## Installation
 
 1. Copy the generated **nukeris.py** into your `.nuke` folder.
@@ -71,6 +73,8 @@ Keys are handled only while the game widget owns focus. Ctrl/Alt/Meta combinatio
 ## Settings v2 and Personal Ranking
 
 Settings are stored at `~/.nuke/NUKERIS/settings.json`, including Normal PB, per-mode/ruleset ranked PBs, grid preference and ranking opt-ins. Legacy `nukeris_settings.json` beside the loaded module is migrated without deleting the old file. The highest Normal PB is preserved.
+
+SETTINGS separates Display, Studio, Global and Network state. PRIVACY & NETWORK INFO opens detailed safety information. Countries have readable names; Japan has a 47-prefecture selector. Other countries allow optional validated region text. Existing profile values and opt-ins are retained until changed. Studio TEST checks only the selected folder's availability/reported permissions after explicit enablement; it neither writes files nor certifies all NAS guarantees.
 
 Unique temporary files, flush/fsync/close, OS locks and safe replacement protect saved data. If local persistence fails, the previous file is retained and new records remain in memory for a later save attempt. An unwritable disk cannot preserve those pending changes across process exit. Studio/Global failures never delete Personal results.
 

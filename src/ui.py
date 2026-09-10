@@ -71,6 +71,8 @@ class NukerisPanel(QtWidgets.QWidget):
         self.setFocusPolicy(QC.StrongFocus)
         self.setMouseTracking(True)
         self.setMinimumSize(360, 600)
+        self._font_cache = {}
+        self._label_cache = {}
 
         self.settings = SettingsStore()
         self.preferences = self.settings.read()
@@ -113,7 +115,7 @@ class NukerisPanel(QtWidgets.QWidget):
         self._grid_checkbox.setFocusPolicy(QC.NoFocus)
         self._grid_checkbox.setCursor(QC.PointingHandCursor)
         self._grid_checkbox.setToolTip(
-            "Show a Nuke-style dotted grid aligned exactly to the one-cell movement step."
+            "Show Node Graph guide dots and sparse major guides. Display only."
         )
         self._grid_checkbox.toggled.connect(self._grid_changed)
 
@@ -121,12 +123,17 @@ class NukerisPanel(QtWidgets.QWidget):
         self._mode_combo.addItems(MODE_LABELS)
         self._mode_combo.setFocusPolicy(QC.NoFocus)
         self._mode_combo.setToolTip('Select a mode, then start a new game.')
-        self._ranking_button = QtWidgets.QPushButton('RANKING', self)
+        self._ranking_button = QtWidgets.QToolButton(self)
+        self._ranking_button.setText('RANKING')
+        self._ranking_button.setAutoRaise(True)
         self._ranking_button.setFocusPolicy(QC.NoFocus)
         self._ranking_button.clicked.connect(self._show_ranking)
-        self._settings_button = QtWidgets.QPushButton('SETTINGS', self)
+        self._settings_button = QtWidgets.QToolButton(self)
+        self._settings_button.setText('SETTINGS')
+        self._settings_button.setAutoRaise(True)
         self._settings_button.setFocusPolicy(QC.NoFocus)
         self._settings_button.clicked.connect(self._show_settings)
+        self._mode_combo.currentIndexChanged.connect(lambda _index: self.update())
         self._apply_button_style()
 
     # ---------- Palette / Nuke look ----------
@@ -211,6 +218,10 @@ class NukerisPanel(QtWidgets.QWidget):
             )
 
     def changeEvent(self, event) :
+        if event.type() in (_enum_value(QtCore.QEvent, 'Type', 'FontChange'),
+                            _enum_value(QtCore.QEvent, 'Type', 'ApplicationFontChange')):
+            self._font_cache.clear()
+            self._label_cache.clear()
         if event.type() in (
             QC.PaletteChange,
             QC.ApplicationPaletteChange,
@@ -227,7 +238,7 @@ class NukerisPanel(QtWidgets.QWidget):
 
         # GAME follows the board instead of being pinned to the bottom of a tall pane.
         # This removes large dead zones while keeping all real widgets inside the viewport.
-        game_y = board_bottom + (28.0 if layout["compact"] else 16.0)
+        game_y = board_bottom + (44.0 if layout["compact"] else 12.0)
         button_y = game_y + 21.0
         button_w = min(132.0, max(92.0, w - 2.0 * margin))
         button_x = margin
@@ -236,12 +247,10 @@ class NukerisPanel(QtWidgets.QWidget):
         )
 
         checkbox_w = min(190.0, max(132.0, w - 2.0 * margin))
-        self._grid_checkbox.setGeometry(
-            int(round(margin)), int(round(button_y + 35.0)), int(round(checkbox_w)), 24
-        )
-        self._ranking_button.setGeometry(int(margin+button_w+8), int(button_y), 100, 28)
-        self._settings_button.setGeometry(int(margin+button_w+114), int(button_y), 92, 28)
-        self._mode_combo.setGeometry(12, 54, min(220, int(w)-140), 26)
+        self._grid_checkbox.setGeometry(int(margin+button_w+12), int(button_y+2), int(checkbox_w), 24)
+        self._ranking_button.setGeometry(int(w)-164, 10, 74, 24)
+        self._settings_button.setGeometry(int(w)-88, 10, 76, 24)
+        self._mode_combo.setGeometry(12, 50, min(220, int(w)-140), 26)
         QtWidgets.QWidget.resizeEvent(self, event)
 
     # ---------- Lifecycle / safety ----------
@@ -380,6 +389,21 @@ class NukerisPanel(QtWidgets.QWidget):
     }
 
     def event(self, event) :
+        if event.type() == _enum_value(QtCore.QEvent, 'Type', 'ToolTip'):
+            layout = panel_layout(self.width(), self.height())
+            bx, by, bw, bh = layout['board']
+            pos = event.pos()
+            if bx <= pos.x() < bx+bw and by <= pos.y() < by+bh:
+                x, y = int((pos.x()-bx)/layout['cell']), int((pos.y()-by)/layout['cell'])
+                placed = self.engine.board[y][x]
+                kind = placed.kind if placed else None
+                if self.engine.active and (x,y) in self.engine.active.cells():
+                    kind = self.engine.active.kind
+                if kind:
+                    QtWidgets.QToolTip.showText(event.globalPos(), NODE_STYLES[kind]['label'], self)
+                    return True
+            event.accept()
+            return True
         # Nuke has single-key QAction shortcuts (S, D, etc.) that are resolved before
         # QWidget.keyPressEvent(). ShortcutOverride is Qt's local mechanism for a focused
         # widget to say "I own this key" without installing a global event filter or
@@ -578,13 +602,14 @@ class NukerisPanel(QtWidgets.QWidget):
 
     # ---------- Painting ----------
 
-    @staticmethod
-    def _font(size, weight=QC.FontNormal) :
-        app = QtWidgets.QApplication.instance()
-        f = QtGui.QFont(app.font() if app is not None else QtGui.QFont())
-        f.setPixelSize(max(8, int(size)))
-        f.setWeight(weight)
-        return f
+    def _font(self, size, weight=QC.FontNormal) :
+        key = (max(8, int(size)), weight)
+        if key not in self._font_cache:
+            f = QtGui.QFont(self.font())
+            f.setPixelSize(key[0])
+            f.setWeight(weight)
+            self._font_cache[key] = f
+        return self._font_cache[key]
 
     def paintEvent(self, event) :
         # Do not allow Python exceptions to escape a Qt paint callback inside Nuke.
@@ -635,7 +660,7 @@ class NukerisPanel(QtWidgets.QWidget):
                      t) :
         # Properties-style node-name field: shallow inset with a soft top-light vertical
         # gradient. No heavy left shadow; the lighting reads as coming from above.
-        title_h = 48.0
+        title_h = 42.0
         p.fillRect(QtCore.QRectF(0.0, 0.0, width, title_h), t["titlebar"])
 
         accent = self._mix(t["highlight"], t["text"], 0.10)
@@ -643,8 +668,8 @@ class NukerisPanel(QtWidgets.QWidget):
         p.setBrush(accent)
         p.drawRect(QtCore.QRectF(0.0, 0.0, width, 2.0))
 
-        field_w = max(150.0, width - (2.0 * margin))
-        name_rect = QtCore.QRectF(margin, 8.0, field_w, 34.0)
+        field_w = max(150.0, width - 188.0)
+        name_rect = QtCore.QRectF(margin, 7.0, field_w, 28.0)
         name_base = self._mix(t["base"], t["titlebar"], 0.14)
         grad = QtGui.QLinearGradient(name_rect.topLeft(), name_rect.bottomLeft())
         grad.setColorAt(0.0, self._mix(name_base, QtGui.QColor("#000000"), 0.045))
@@ -671,7 +696,7 @@ class NukerisPanel(QtWidgets.QWidget):
             QtCore.QPointF(name_rect.right() - 1.0, name_rect.bottom() - 1.0),
         )
 
-        title_font = self._font(21, QC.FontMedium)
+        title_font = self._font(17, QC.FontMedium)
         p.setFont(title_font)
         p.setPen(t["text"])
         title_text = PANEL_TITLE
@@ -695,8 +720,8 @@ class NukerisPanel(QtWidgets.QWidget):
         p.setFont(self._font(13, QC.FontMedium))
         warning = self.session and self.session.mode == SCORE_ATTACK and 0 < 120000-self.session.elapsed_ms <= 10000
         p.setPen(QtGui.QColor('#D5A34B') if warning else t['text'])
-        p.drawText(QtCore.QRectF(width-126, 54, 114, 26), QC.AlignRight | QC.AlignVCenter, self._time_display())
-        if width >= 720:
+        p.drawText(QtCore.QRectF(width-126, 50, 114, 26), QC.AlignRight | QC.AlignVCenter, self._header_time())
+        if width >= 900:
             status = "INPUT ACTIVE" if self.input_active and not self.paused else "INPUT RELEASED"
             p.setPen(t["muted"])
             p.setFont(self._font(10, QC.FontMedium))
@@ -706,11 +731,18 @@ class NukerisPanel(QtWidgets.QWidget):
                 status,
             )
 
+    def _display_mode(self):
+        return self.session.mode if self.session else MODES[self._mode_combo.currentIndex()]
+
+    def _header_time(self):
+        return '' if self._display_mode() == NORMAL else self._time_display()
+
     def _time_display(self):
-        if self.session and self.session.mode == SCORE_ATTACK:
-            return format_milliseconds(max(0, 120000-self.session.elapsed_ms))
-        if self.session and self.session.mode == SPRINT:
-            return format_milliseconds(self.session.elapsed_ms)
+        elapsed = self.session.elapsed_ms if self.session else 0
+        if self._display_mode() == SCORE_ATTACK:
+            return format_milliseconds(max(0, 120000-elapsed))[:-2]
+        if self._display_mode() == SPRINT:
+            return format_milliseconds(elapsed)
         return self._format_time(self._active_seconds)
 
     def _draw_board(self, p, rect, cell,
@@ -783,13 +815,9 @@ class NukerisPanel(QtWidgets.QWidget):
 
     def _draw_node_graph_grid(self, p, rect, cell,
                               t) :
-        """Draw a Nuke-like dotted grid whose intersections are the node centers.
-
-        One grid interval is exactly one game-cell move. Because node centers are also
-        at (index + 0.5) * cell, every tetromino node lands precisely on a cross point.
-        """
-        grid = self._mix(t["text"], t["board"], 0.54)
-        grid.setAlpha(125)
+        """Sparse workspace guides, without drawing a box around each game cell."""
+        grid = QtGui.QColor('#606060')
+        grid.setAlpha(105)
         pen = QtGui.QPen(grid, 1.0)
         pen.setStyle(QC.DotLine)
         pen.setCapStyle(QC.FlatCap)
@@ -799,13 +827,20 @@ class NukerisPanel(QtWidgets.QWidget):
         p.setPen(pen)
         p.setBrush(QC.NoBrush)
 
-        # Vertical and horizontal lines pass through the same centers used by _node_rect.
-        for x in range(BOARD_W):
+        # Major guides span four moves; minor guides are isolated center points.
+        for x in range(0,BOARD_W,4):
             px = rect.left() + (x + 0.5) * cell
             p.drawLine(QtCore.QPointF(px, rect.top()), QtCore.QPointF(px, rect.bottom()))
-        for y in range(BOARD_H):
+        for y in range(0,BOARD_H,4):
             py = rect.top() + (y + 0.5) * cell
             p.drawLine(QtCore.QPointF(rect.left(), py), QtCore.QPointF(rect.right(), py))
+
+        dots = QtGui.QColor('#707070')
+        dots.setAlpha(150)
+        p.setPen(QtGui.QPen(dots,1.0))
+        for x in range(BOARD_W):
+            for y in range(BOARD_H):
+                p.drawPoint(QtCore.QPointF(rect.left()+(x+.5)*cell,rect.top()+(y+.5)*cell))
 
         p.restore()
 
@@ -813,8 +848,7 @@ class NukerisPanel(QtWidgets.QWidget):
     def _node_rect(board_rect, cell, x, y) :
         cx = board_rect.left() + (x + 0.5) * cell
         cy = board_rect.top() + (y + 0.5) * cell
-        node_w = max(7.0, cell * 0.78)
-        node_h = max(5.0, cell * 0.46)
+        node_w, node_h = node_dimensions(cell)
         return QtCore.QRectF(cx - node_w * 0.5, cy - node_h * 0.5, node_w, node_h)
 
     @staticmethod
@@ -852,11 +886,10 @@ class NukerisPanel(QtWidgets.QWidget):
         start, end = (QtCore.QPointF(*pt) for pt in endpoints)
         color = QtGui.QColor(t['wire'])
         if ghost:
-            color = QtGui.QColor(t['faint'])
-            color.setAlpha(70)
+            color.setAlpha(105)
         elif subtle:
             color.setAlpha(75)
-        pen = QtGui.QPen(color, 1.1 if active else 1.0)
+        pen = QtGui.QPen(color, 1.15)
         if ghost:
             pen.setStyle(QC.DashLine)
         p.setPen(pen)
@@ -870,8 +903,8 @@ class NukerisPanel(QtWidgets.QWidget):
         if length < 1.0:
             return
         ux, uy = dx/length, dy/length
-        size = min(max(2.0, cell*.12), length*.65)
-        tip = QtCore.QPointF(end.x()-ux*.4, end.y()-uy*.4)
+        size = min(max(2.8, cell*.15), 5.0, length*.78)
+        tip = QtCore.QPointF(end.x()-ux*.2, end.y()-uy*.2)
         base = QtCore.QPointF(tip.x()-ux*size, tip.y()-uy*size)
         wing = size*.5
         points = [tip, QtCore.QPointF(base.x()-uy*wing, base.y()+ux*wing),
@@ -953,7 +986,7 @@ class NukerisPanel(QtWidgets.QWidget):
         p.setBrush(grad)
         border = QtGui.QColor("#141414")
         if active:
-            border = self._mix(border, t["text"], 0.28)
+            border = self._mix(t['highlight'], t['text'], 0.28)
         p.setPen(QtGui.QPen(border, 1.0))
         p.drawRect(r)
 
@@ -976,34 +1009,43 @@ class NukerisPanel(QtWidgets.QWidget):
 
         if show_label:
             label = style["label"]
-            # The node name is decorative, but never abbreviated or clipped. Scale the
-            # complete word to the node body instead of eliding it at small pane sizes.
+            # Keep text legible; narrow nodes use class abbreviations, with the full
+            # class name available on hover. Never shrink text into unreadable paths.
             text_color = QtGui.QColor("#111111") if base.lightness() >= 82 else QtGui.QColor("#E7E7E7")
-            self._draw_fitted_node_label(p, r.adjusted(2.0, 1.0, -2.0, -1.0), label, text_color)
+            self._draw_fitted_node_label(p, r.adjusted(1.0, .5, -1.0, -.5), label, text_color)
 
     def _draw_fitted_node_label(self, p, rect,
                                 text, color) :
         if rect.width() <= 1.0 or rect.height() <= 1.0 or not text:
             return
-        font = self._font(12, QC.FontMedium)
-        path = QtGui.QPainterPath()
-        path.addText(0.0, 0.0, font, text)
-        bounds = path.boundingRect()
-        if bounds.width() <= 0.0 or bounds.height() <= 0.0:
-            return
-        sx = max(0.02, rect.width() / bounds.width())
-        sy = max(0.02, rect.height() / bounds.height())
-        scale = min(1.0, sx, sy)
-        draw_w = bounds.width() * scale
-        draw_h = bounds.height() * scale
-        tx = rect.center().x() - draw_w * 0.5 - bounds.left() * scale
-        ty = rect.center().y() - draw_h * 0.5 - bounds.top() * scale
+        key = (text, int(rect.width()), int(rect.height()))
+        if key not in self._label_cache:
+            short = {'Transform': ('Xform','Tr'), 'Grade': ('Gr',), 'Merge': ('Mrg','Mg'),
+                     'Read': ('Rd',), 'Write': ('Wr',), 'Blur': ('Bl',), 'Roto': ('Rt',)}
+            choices = (text,) + short.get(text, ())
+            selected = (choices[-1], self._font(8, QC.FontMedium))
+            for label in choices:
+                found = False
+                for size in (11,10,9,8):
+                    font = self._font(size, QC.FontMedium)
+                    metrics = QtGui.QFontMetricsF(font)
+                    if metrics.horizontalAdvance(label) <= rect.width() and metrics.tightBoundingRect(label).height() <= rect.height():
+                        selected, found = (label, font), True
+                        break
+                if found:
+                    break
+            if len(self._label_cache) >= 256:
+                self._label_cache.clear()
+            self._label_cache[key] = selected
+        label, font = self._label_cache[key]
         p.save()
-        p.translate(tx, ty)
-        p.scale(scale, scale)
-        p.setPen(QC.NoPen)
-        p.setBrush(color)
-        p.drawPath(path)
+        p.setClipRect(rect.adjusted(-.5,-.5,.5,.5))
+        p.setFont(font)
+        p.setPen(color)
+        # Qt's line height includes extra leading; center the actual glyphs instead.
+        bounds = QtGui.QFontMetricsF(font).tightBoundingRect(label)
+        p.drawText(QtCore.QPointF(rect.center().x()-bounds.center().x(),
+                                 rect.center().y()-bounds.center().y()), label)
         p.restore()
 
     def _draw_clear_effect(self, p, board, cell,
@@ -1185,17 +1227,10 @@ class NukerisPanel(QtWidgets.QWidget):
         preview_h = min(66.0, max(54.0, board.height() * 0.145))
         self._draw_piece_preview(p, self.engine.hold_kind, left_x, y, side, preview_h, t)
 
-        # STATS — TIME intentionally sits directly beneath LINES.
+        # Normal session time lives here only; challenges use the header clock.
         stats_y = y + preview_h + 7.0
         stats_y = self._draw_section_header(p, left_x, stats_y, side, "STATS", t)
-        rows = [
-            ("score", "{0:,}".format(self.engine.score), True),
-            ("best", "{0:,}".format(self.engine.best_score), False),
-            ("level", "{0:02d}".format(self.engine.level), False),
-            ("lines", "{0:03d}".format(self.engine.lines), False),
-            ("time", self._time_display(), True),
-        ]
-        for label, value, emphasize in rows:
+        for label, value, emphasize in self._stats_rows():
             self._draw_static_row(p, left_x, stats_y, side, label, value, t, emphasize)
             stats_y += 29.0
 
@@ -1207,32 +1242,42 @@ class NukerisPanel(QtWidgets.QWidget):
         # NEXT
         y = self._draw_section_header(p, right_x, top, side, "NEXT", t)
         available = max(160.0, board.bottom() - y)
-        item_h = min(59.0, max(42.0, (available - (NEXT_COUNT - 1) * 5.0) / NEXT_COUNT))
-        for kind in self.engine.next_pieces(NEXT_COUNT):
+        item_h = min(55.0, max(38.0, (available - (NEXT_COUNT - 1) * 4.0) / NEXT_COUNT))
+        for index, kind in enumerate(self.engine.next_pieces(NEXT_COUNT)):
             self._draw_piece_preview(
-                p, kind, right_x, y, side, item_h, t, show_label=False
+                p, kind, right_x+12, y, side-12, item_h, t, show_label=False
             )
-            y += item_h + 3.0
+            p.setFont(self._font(9))
+            p.setPen(t['muted'])
+            p.drawText(QtCore.QRectF(right_x,y,12,item_h), QC.AlignVCenter, str(index+1))
+            y += item_h + 4.0
 
     def _draw_compact_previews(self, p, margin, width, board, t):
         p.setFont(self._font(10, QC.FontMedium))
         p.setPen(t['muted'])
-        p.drawText(QtCore.QRectF(margin, 90, 80, 16), QC.AlignLeft, 'HOLD')
-        p.drawText(QtCore.QRectF(width-192, 90, 180, 16), QC.AlignLeft, 'NEXT')
-        self._draw_piece_preview(p, self.engine.hold_kind, margin, 107, 88, 48, t)
+        p.drawText(QtCore.QRectF(margin, 84, 80, 16), QC.AlignLeft, 'HOLD')
+        p.drawText(QtCore.QRectF(width-192, 84, 180, 16), QC.AlignLeft, 'NEXT')
+        self._draw_piece_preview(p, self.engine.hold_kind, margin, 102, 88, 40, t)
         for i, kind in enumerate(self.engine.next_pieces(3)):
-            self._draw_piece_preview(p, kind, width-192+i*60, 107, 56, 48, t, False)
+            self._draw_piece_preview(p, kind, width-192+i*60, 102, 56, 40, t, False)
+
+    def _stats_rows(self):
+        rows = [('score', '{0:,}'.format(self.engine.score), True),
+                ('best', '{0:,}'.format(self.engine.best_score), False),
+                ('level', str(self.engine.level), False),
+                ('lines', str(self.engine.lines), False)]
+        if self._display_mode() == NORMAL:
+            rows.append(('time', self._time_display(), True))
+        return rows
 
     def _draw_compact_stats(self, p, margin, width,
                             board, t) :
-        # Narrow-pane fallback. Keep LINES immediately followed by TIME in reading order.
-        y = board.bottom() + 2
-        p.setFont(self._font(13, QC.FontMedium))
+        y = board.bottom() + 4
+        p.setFont(self._font(11, QC.FontMedium))
         p.setPen(t["text"])
         text = (
-            "SCORE {0:,}    LV {1:02d}    LINES {2:03d}".format(
-                self.engine.score, self.engine.level, self.engine.lines,
-                self._time_display()
+            "score {0:,}    level {1}    lines {2}".format(
+                self.engine.score, self.engine.level, self.engine.lines
             )
         )
         p.drawText(
@@ -1240,6 +1285,11 @@ class NukerisPanel(QtWidgets.QWidget):
             QC.AlignCenter,
             text,
         )
+        detail = 'best {0:,}'.format(self.engine.best_score)
+        if self._display_mode() == NORMAL:
+            detail += '    time ' + self._time_display()
+        p.setPen(t['muted'])
+        p.drawText(QtCore.QRectF(margin,y+18,width-2*margin,18), QC.AlignCenter, detail)
 
     def _draw_label(self, p, x, y, width,
                     text, t) :
@@ -1256,11 +1306,9 @@ class NukerisPanel(QtWidgets.QWidget):
                             width, height, t,
                             show_label = True) :
         r = QtCore.QRectF(x, y, width, height)
-        preview_t = t
-        if not show_label:
-            preview_t = dict(t)
-            preview_t["soft_border"] = self._mix(t.get("soft_border", t["border"]), t["window"], 0.28)
-        self._draw_group_box(p, r, preview_t)
+        if show_label:
+            # Hold remains a single quiet well; Next is unboxed and ordered by position.
+            p.fillRect(r, self._mix(t['window'], t['base'], .25))
         if not kind:
             p.setPen(t["faint"])
             p.setFont(self._font(9, QC.FontMedium))
@@ -1297,12 +1345,6 @@ class NukerisPanel(QtWidgets.QWidget):
     def _draw_bind(self, p, x, y, keys,
                    icon, label, t) :
         start_x = x
-        p.setPen(t["muted"])
-        p.setFont(self._font(13, QC.FontDemiBold))
-        icon_rect = QtCore.QRectF(x, y, 18, 20)
-        p.drawText(icon_rect, QC.AlignCenter, icon)
-        x += 22
-
         for i, key in enumerate(keys):
             kw = self._draw_keycap(p, x, y, key, t, wide=(key == "SPACE"))
             x += kw
@@ -1322,8 +1364,8 @@ class NukerisPanel(QtWidgets.QWidget):
 
     def _draw_footer(self, p, margin, width, height,
                      board, t) :
-        game_y = board.bottom() + (28.0 if width < 650 else 16.0)
-        controls_y = game_y + 94.0
+        game_y = board.bottom() + (44.0 if width < 650 else 12.0)
+        controls_y = game_y + 56.0
 
         self._draw_section_header(
             p, margin, game_y, width - 2.0 * margin, "GAME", t
@@ -1334,12 +1376,11 @@ class NukerisPanel(QtWidgets.QWidget):
         )
         base_y = controls_y + 24.0
 
-        if width < 500:
+        if width < 650:
             p.setFont(self._font(10, QC.FontNormal))
             p.setPen(t['text'])
             for i, text in enumerate(('A/D MOVE   Q/E ROTATE   C HOLD', 'S DOWN   SPACE/W DROP   ESC PAUSE')):
-                p.drawText(QtCore.QRectF(margin, base_y+i*23, width-2*margin, 20), QC.AlignLeft, text)
-            return
+                p.drawText(QtCore.QRectF(margin, base_y+i*18, width-2*margin, 18), QC.AlignLeft, text)
         rows = [
             [
                 (("A", "D"), "↔", "MOVE"),
@@ -1354,13 +1395,13 @@ class NukerisPanel(QtWidgets.QWidget):
         ]
 
         available = max(1.0, width - 2.0 * margin)
-        for row_index, row in enumerate(rows):
+        for row_index, row in enumerate(rows if width >= 650 else []):
             widths = []
             for keys, icon, label in row:
                 key_w = sum(42.0 if k == "SPACE" else max(22.0, 11.0 + len(k) * 7.0) for k in keys)
                 key_w += max(0, len(keys) - 1) * 3.0
                 label_w = max(42.0, len(label) * 6.3 + 3.0)
-                widths.append(22.0 + key_w + 6.0 + label_w)
+                widths.append(key_w + 6.0 + label_w)
             raw_gap = (available - sum(widths)) / max(1, len(row) - 1)
             gap = max(4.0, min(14.0, raw_gap))
             x = margin + 4.0
@@ -1369,13 +1410,13 @@ class NukerisPanel(QtWidgets.QWidget):
                 self._draw_bind(p, x, y, keys, icon, label, t)
                 x += item_w + gap
 
-        copyright_y = base_y + 53.0
+        copyright_y = base_y + (38.0 if width < 650 else 53.0)
         if copyright_y + 13.0 < height - 2.0:
             p.setPen(t["faint"])
             p.setFont(self._font(9, QC.FontNormal))
             p.drawText(
                 QtCore.QRectF(margin, copyright_y, width - (2.0 * margin), 13.0),
-                QC.AlignRight | QC.AlignVCenter,
+                QC.AlignLeft | QC.AlignVCenter,
                 "© 2026 Kota Mori",
             )
 
@@ -1406,13 +1447,13 @@ class NukerisPanel(QtWidgets.QWidget):
             return
 
         veil = QtGui.QColor(t["board"])
-        veil.setAlpha(224)
+        veil.setAlpha(40 if title == 'PAUSED' else 165)
         p.setPen(QC.NoPen)
         p.setBrush(veil)
         p.drawRoundedRect(board, 2.0, 2.0)
 
         p.setPen(t["text"])
-        p.setFont(self._font(20, QC.FontDemiBold))
+        p.setFont(self._font(16 if title == 'PAUSED' else 20, QC.FontDemiBold))
         center_y = board.center().y() - 40
         p.drawText(
             QtCore.QRectF(board.left(), center_y, board.width(), 28),

@@ -9,10 +9,12 @@
 | src/geometry.py | Orthogonal edge endpoints and responsive board layout |
 | src/modes.py | Session clocks, completion, result records, mode/ruleset IDs |
 | src/settings.py | User settings v2, legacy migration, local PB merging and pending results |
+| src/locations.py | Static country/prefecture display data and legacy label conversion |
 | src/studio.py | Explicit shared-folder access and validated per-player PB files |
 | src/global_client.py | Opt-in protocol, payload allowlist and response validation; no HTTP library |
 | src/network.py | Lazy QtNetwork transport with timeout, size bound and cancellation |
-| src/dialogs.py | Settings/ranking UI and on-demand Studio I/O |
+| src/dialogs.py | Ranking UI and on-demand Studio I/O |
+| src/settings_ui.py | Settings/privacy dialogs, location selectors and explicit folder test |
 | src/ui.py | Nuke-looking widget, gameplay focus, timers, rendering and panel registration |
 | backend/ | Worker API, D1 schema and tests using an in-memory SQLite adapter |
 

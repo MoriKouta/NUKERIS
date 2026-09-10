@@ -70,7 +70,7 @@ NODE_STYLES = {
 # The reference Node Graph screenshots sit at roughly #323232. Keep the playfield
 # on that graph color while the surrounding tool chrome still follows Nuke's Qt palette.
 NUKE_GRAPH_BG = "#323232"
-NUKE_WIRE = "#111111"
+NUKE_WIRE = "#929292"
 
 # SRS-compatible piece states in a 4x4 local grid.
 PIECE_CELLS = {
