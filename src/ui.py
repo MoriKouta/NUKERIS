@@ -72,6 +72,7 @@ class NukerisPanel(QtWidgets.QWidget):
         self.setMouseTracking(True)
         self.setMinimumSize(360, 600)
 
+        self.session = None
         self.engine = GameEngine()
         self.started = False
         self.paused = True
@@ -108,6 +109,10 @@ class NukerisPanel(QtWidgets.QWidget):
         )
         self._grid_checkbox.toggled.connect(lambda _checked: self.update())
 
+        self._mode_combo = QtWidgets.QComboBox(self)
+        self._mode_combo.addItems(MODE_LABELS)
+        self._mode_combo.setFocusPolicy(QC.NoFocus)
+        self._mode_combo.setToolTip('Select a mode, then start a new game.')
         self._apply_button_style()
 
     # ---------- Palette / Nuke look ----------
@@ -220,6 +225,7 @@ class NukerisPanel(QtWidgets.QWidget):
         self._grid_checkbox.setGeometry(
             int(round(margin)), int(round(button_y + 35.0)), int(round(checkbox_w)), 24
         )
+        self._mode_combo.setGeometry(12, 54, min(220, int(w)-140), 26)
         QtWidgets.QWidget.resizeEvent(self, event)
 
     # ---------- Lifecycle / safety ----------
@@ -248,9 +254,9 @@ class NukerisPanel(QtWidgets.QWidget):
         self.update()
 
     def _new_game(self) :
-        best = self.engine.best_score
-        self.engine = GameEngine()
-        self.engine.best_score = best
+        mode = MODES[self._mode_combo.currentIndex()]
+        self.session = GameSession(mode)
+        self.engine = self.session.engine
         self.started = True
         self.paused = False
         self.error_text = ""
@@ -282,6 +288,7 @@ class NukerisPanel(QtWidgets.QWidget):
             self._clear_fx_started = _monotonic()
 
     def showEvent(self, event) :
+        self._check_session()
         QtWidgets.QWidget.showEvent(self, event)
         self.update()
 
@@ -293,6 +300,7 @@ class NukerisPanel(QtWidgets.QWidget):
         QtWidgets.QWidget.hideEvent(self, event)
 
     def focusInEvent(self, event) :
+        self._check_session()
         self.input_active = True
         QtWidgets.QWidget.focusInEvent(self, event)
         self.update()
@@ -371,7 +379,7 @@ class NukerisPanel(QtWidgets.QWidget):
                 event.ignore()
                 return
 
-            if self.engine.game_over:
+            if self.engine.game_over or (self.session and self.session.finished):
                 if key in (
                     QC.Key_Space,
                     QC.Key_Return,
@@ -391,28 +399,31 @@ class NukerisPanel(QtWidgets.QWidget):
                 event.ignore()
                 return
 
+            if self._check_session():
+                event.accept()
+                return
             handled = True
 
             # WASD + Q/E layout. Arrow keys remain available as a fallback.
             if key in (QC.Key_A, QC.Key_Left):
-                self.engine.move(-1, 0)
+                self.session.action('move', -1, 0)
             elif key in (QC.Key_D, QC.Key_Right):
-                self.engine.move(1, 0)
+                self.session.action('move', 1, 0)
             elif key in (QC.Key_S, QC.Key_Down):
-                self.engine.soft_drop()
+                self.session.action('soft_drop')
                 self._capture_clear_fx()
             elif key == QC.Key_Q:
                 if not event.isAutoRepeat():
-                    self.engine.rotate(-1)
+                    self.session.action('rotate', -1)
             elif key in (QC.Key_E, QC.Key_Up):
                 if not event.isAutoRepeat():
-                    self.engine.rotate(1)
+                    self.session.action('rotate', 1)
             elif key == QC.Key_C:
                 if not event.isAutoRepeat():
-                    self.engine.hold()
+                    self.session.action('hold')
             elif key in (QC.Key_W, QC.Key_Space):
                 if not event.isAutoRepeat():
-                    self.engine.hard_drop()
+                    self.session.action('hard_drop')
                     self._capture_clear_fx()
             else:
                 handled = False
@@ -428,8 +439,22 @@ class NukerisPanel(QtWidgets.QWidget):
 
     # ---------- Game timer ----------
 
+    def _check_session(self):
+        if self.session is None:
+            return False
+        self.session.advance()
+        if self.session.finished:
+            self.paused = True
+            self.input_active = False
+            self._stop_timer()
+            self.update()
+            return True
+        return False
+
     def _on_timer(self) :
         try:
+            if self._check_session():
+                return
             if self.paused or not self.started or self.engine.game_over or not self.isVisible():
                 self._stop_timer()
                 return
@@ -437,16 +462,17 @@ class NukerisPanel(QtWidgets.QWidget):
             now = _monotonic()
             dt = max(0.0, min(now - self._last_tick, 0.100))
             self._last_tick = now
-            self._active_seconds += dt
+            self.session.advance(dt)
+            self._active_seconds = self.session.elapsed_ms / 1000.0
             self._fall_accum_ms += dt * 1000.0
 
             interval = self.engine.fall_interval_ms
             if self._fall_accum_ms >= interval:
                 self._fall_accum_ms = 0.0
-                self.engine.gravity_step()
+                self.session.action('gravity_step')
                 self._capture_clear_fx()
 
-            if self.engine.game_over:
+            if self.engine.game_over or (self.session and self.session.finished):
                 self.paused = True
                 self.input_active = False
                 self._stop_timer()
@@ -571,6 +597,10 @@ class NukerisPanel(QtWidgets.QWidget):
             "v{0}".format(__version__),
         )
 
+        p.setFont(self._font(13, QC.FontMedium))
+        warning = self.session and self.session.mode == SCORE_ATTACK and 0 < 120000-self.session.elapsed_ms <= 10000
+        p.setPen(QtGui.QColor('#D5A34B') if warning else t['text'])
+        p.drawText(QtCore.QRectF(width-126, 54, 114, 26), QC.AlignRight | QC.AlignVCenter, self._time_display())
         if width >= 720:
             status = "INPUT ACTIVE" if self.input_active and not self.paused else "INPUT RELEASED"
             p.setPen(t["muted"])
@@ -580,6 +610,13 @@ class NukerisPanel(QtWidgets.QWidget):
                 QC.AlignRight | QC.AlignVCenter,
                 status,
             )
+
+    def _time_display(self):
+        if self.session and self.session.mode == SCORE_ATTACK:
+            return format_milliseconds(max(0, 120000-self.session.elapsed_ms))
+        if self.session and self.session.mode == SPRINT:
+            return format_milliseconds(self.session.elapsed_ms)
+        return self._format_time(self._active_seconds)
 
     def _draw_board(self, p, rect, cell,
                     t) :
@@ -1061,7 +1098,7 @@ class NukerisPanel(QtWidgets.QWidget):
             ("best", "{0:,}".format(self.engine.best_score), False),
             ("level", "{0:02d}".format(self.engine.level), False),
             ("lines", "{0:03d}".format(self.engine.lines), False),
-            ("time", self._format_time(self._active_seconds), True),
+            ("time", self._time_display(), True),
         ]
         for label, value, emphasize in rows:
             self._draw_static_row(p, left_x, stats_y, side, label, value, t, emphasize)
@@ -1100,7 +1137,7 @@ class NukerisPanel(QtWidgets.QWidget):
         text = (
             "SCORE {0:,}    LV {1:02d}    LINES {2:03d}    TIME {3}".format(
                 self.engine.score, self.engine.level, self.engine.lines,
-                self._format_time(self._active_seconds)
+                self._time_display()
             )
         )
         p.drawText(
@@ -1252,12 +1289,15 @@ class NukerisPanel(QtWidgets.QWidget):
         elif not self.started:
             title = "READY"
             sub = "CLICK BOARD OR PRESS SPACE"
+        elif self.session and self.session.finished:
+            title = "FINISHED" if self.session.result else "GAME OVER"
+            sub = (self._time_display() if self.session.mode == SPRINT else "SCORE {0:,}".format(self.engine.score)) + " - NEW GAME"
         elif self.engine.game_over:
             title = "GAME OVER"
             sub = "{0:,}  ·  SPACE / NEW GAME".format(self.engine.score)
         elif self.paused:
             title = "PAUSED"
-            sub = "CLICK BOARD OR PRESS SPACE"
+            sub = "Ranked timer is still running." if self.session and self.session.ranked else "CLICK BOARD OR PRESS SPACE"
 
         if not title:
             return

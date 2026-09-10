@@ -213,6 +213,7 @@ class GameEngine(object):
         self.last_clear_rows = []
         self.clear_event_id = 0
         self._next_group_id = 1
+        self.pieces_locked = 0
         self._fill_queue()
         self._spawn()
 
@@ -341,6 +342,7 @@ class GameEngine(object):
         for x, y in cells:
             self.board[y][x] = PlacedCell(self.active.kind, group_id)
 
+        self.pieces_locked += 1
         cleared = self._clear_lines()
         self.last_clear = cleared
         self._score_clear(cleared)
