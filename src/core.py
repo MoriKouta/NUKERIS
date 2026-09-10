@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-NUKERIS v1.1.0
+NUKERIS v1.2.0
 A small, isolated compositing-themed tetromino game for Foundry Nuke 12+.
 
 Safety design:
@@ -43,7 +43,7 @@ from collections import deque
 _monotonic = getattr(time, "monotonic", time.time)
 
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 PANEL_TITLE = "NUKERIS"
 PANEL_ID = "com.mori.nukeris.panel"
 

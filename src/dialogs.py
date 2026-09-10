@@ -121,6 +121,9 @@ class RankingDialog(QtWidgets.QDialog):
         layout.addWidget(self.scope)
         layout.addWidget(self.mode)
         layout.addWidget(self.refresh)
+        self.profile_button = QtWidgets.QPushButton('CREATE / UPDATE ONLINE PROFILE')
+        self.profile_button.clicked.connect(self.profile_action)
+        layout.addWidget(self.profile_button)
         self.table = QtWidgets.QTableWidget(0,4)
         self.table.setHorizontalHeaderLabels(['#','PLAYER','AREA','RESULT'])
         self.table.setEditTriggers(_enum_value(QtWidgets.QAbstractItemView,'EditTrigger','NoEditTriggers'))
@@ -131,13 +134,24 @@ class RankingDialog(QtWidgets.QDialog):
         layout.addWidget(self.status)
         self.ranks = QtWidgets.QLabel()
         layout.addWidget(self.ranks)
+        self.scope.currentIndexChanged.connect(self.selection_changed)
+        self.mode.currentIndexChanged.connect(self.selection_changed)
+        self.profile_button.setVisible(False)
         self.load()
+
+    def selection_changed(self):
+        self.profile_button.setVisible(self.scope.currentIndex()==2)
+        self.table.setRowCount(0)
+        self.ranks.setText('')
+        self.status.setText('Press REFRESH to load this ranking.')
 
     def load(self):
         mode = MODES[self.mode.currentIndex()+1]
         scope = self.scope.currentIndex()
         self.table.setRowCount(0)
         self.ranks.setText('')
+        self.scope.setEnabled(False)
+        self.mode.setEnabled(False)
         if scope == 0:
             r = self.panel.settings.personal().get(mode+'/'+RULESET)
             self.display(dict(ok=True,entries=[dict(r,nickname='YOU',country='',region='')] if r else []))
@@ -148,9 +162,33 @@ class RankingDialog(QtWidgets.QDialog):
             store = self.panel._studio_store()
             run_ranking_io(lambda: store.read(mode), self.display)
         else:
-            self.status.setText('Global ranking is not configured yet. Personal records are safe.')
+            self.refresh.setEnabled(False)
+            self.status.setText('Loading Global ranking...')
+            self.panel.network.leaderboard(mode, self.global_display)
 
+    def profile_action(self):
+        self.profile_button.setEnabled(False)
+        def done(response):
+            self.profile_button.setEnabled(True)
+            self.status.setText('Online profile saved.' if response.get('ok') else response.get('error','Profile request failed.'))
+        if self.panel.settings.read()['player_id']:
+            self.panel.network.update_profile(done)
+        else:
+            self.panel.network.register(done)
+
+    def global_display(self, response):
+        if not response.get('ok'):
+            self.display(dict(ok=False,entries=[],message=response.get('error','Global request failed.')))
+            return
+        self.display(response)
+        ranks = response['ranks']
+        self.ranks.setText('YOUR RANK   WORLD {0}   COUNTRY {1}   REGION {2}'.format(
+            *['#'+str(ranks[k]) if ranks[k] is not None else '--' for k in ('world','country','region')]))
+
+    @QtCore.Slot(object)
     def display(self, response):
+        self.scope.setEnabled(True)
+        self.mode.setEnabled(True)
         self.refresh.setEnabled(True)
         entries = response.get('entries', [])
         self.table.setRowCount(len(entries))

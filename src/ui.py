@@ -1,8 +1,8 @@
 try:
-    from PySide6 import QtCore, QtGui, QtWidgets
+    from PySide6 import QtCore, QtGui, QtWidgets, QtNetwork
     QT_BINDING = "PySide6"
 except ImportError:
-    from PySide2 import QtCore, QtGui, QtWidgets
+    from PySide2 import QtCore, QtGui, QtWidgets, QtNetwork
     QT_BINDING = "PySide2"
 
 
@@ -74,6 +74,11 @@ class NukerisPanel(QtWidgets.QWidget):
 
         self.settings = SettingsStore()
         self.preferences = self.settings.read()
+        self.network = GlobalRankingClient(self.settings, QtNetworkTransport(self))
+        self._run_token = None
+        self._starting_online = False
+        self._start_serial = 0
+        self.result_status = ''
         self.session = None
         self.engine = GameEngine(storage=self.settings)
         self.started = False
@@ -265,11 +270,36 @@ class NukerisPanel(QtWidgets.QWidget):
 
     def _new_game(self) :
         mode = MODES[self._mode_combo.currentIndex()]
-        self.session = GameSession(mode, storage=self.settings)
-        self._result_recorded = False
+        self._start_serial += 1
+        serial = self._start_serial
+        self._run_token = None
+        self._starting_online = False
+        if mode != NORMAL and self.preferences['global_enabled']:
+            self._set_paused(True, release_input=True)
+            self._starting_online = True
+            self.result_status = 'Starting Global run...'
+            def ready(response):
+                if serial != self._start_serial:
+                    return
+                self._starting_online = False
+                if response.get('ok'):
+                    self._run_token = response['run_token']
+                    self.result_status = 'GLOBAL RUN'
+                    self._begin_game(mode, int(response['seed'],16))
+                else:
+                    self.result_status = response.get('error','Global unavailable.') + ' Playing locally.'
+                    self._begin_game(mode)
+            self.network.start_run(mode, ready)
+        else:
+            self.result_status = ''
+            self._begin_game(mode)
+
+    def _begin_game(self, mode, seed=None):
+        self.session = GameSession(mode, storage=self.settings, seed=seed)
         self.engine = self.session.engine
+        self._result_recorded = False
         self.started = True
-        self.paused = False
+        self.paused = not self.hasFocus()
         self.error_text = ""
         self._fall_accum_ms = 0.0
         self._active_seconds = 0.0
@@ -304,6 +334,7 @@ class NukerisPanel(QtWidgets.QWidget):
         self.update()
 
     def hideEvent(self, event) :
+        self._check_session()
         if self.started and not self.engine.game_over:
             self.paused = True
         self.input_active = False
@@ -366,6 +397,9 @@ class NukerisPanel(QtWidgets.QWidget):
 
     def keyPressEvent(self, event) :
         try:
+            if self._starting_online:
+                event.accept()
+                return
             if not self.hasFocus() or event.modifiers() & (QC.ControlModifier | QC.AltModifier | QC.MetaModifier):
                 event.ignore()
                 return
@@ -440,6 +474,7 @@ class NukerisPanel(QtWidgets.QWidget):
                 handled = False
 
             if handled:
+                self._check_session()
                 self.update()
                 event.accept()
             else:
@@ -457,10 +492,17 @@ class NukerisPanel(QtWidgets.QWidget):
 
     def _record_result(self, result):
         if result and result['mode'] != NORMAL:
-            self.settings.record(result)
+            saved = self.settings.record(result)
+            self.result_status = 'PERSONAL RECORD SAVED' if saved else 'Personal result kept in memory; save failed.'
+            if self._run_token and self.preferences['global_enabled']:
+                self.network.submit(self._run_token,result,self._submission_finished)
             if self.preferences['studio_enabled']:
                 store = self._studio_store()
                 run_ranking_io(lambda: store.publish(result))
+
+    def _submission_finished(self, response):
+        self.result_status = 'GLOBAL RESULT SUBMITTED' if response.get('ok') else 'Global submission failed. Personal record is safe.'
+        self.update()
 
     def _studio_store(self):
         p = self.preferences
@@ -513,6 +555,7 @@ class NukerisPanel(QtWidgets.QWidget):
                 self._fall_accum_ms = 0.0
                 self.session.action('gravity_step')
                 self._capture_clear_fx()
+                self._check_session()
 
             if self.engine.game_over or (self.session and self.session.finished):
                 self.paused = True
@@ -1177,7 +1220,7 @@ class NukerisPanel(QtWidgets.QWidget):
         p.setFont(self._font(13, QC.FontMedium))
         p.setPen(t["text"])
         text = (
-            "SCORE {0:,}    LV {1:02d}    LINES {2:03d}    TIME {3}".format(
+            "SCORE {0:,}    LV {1:02d}    LINES {2:03d}".format(
                 self.engine.score, self.engine.level, self.engine.lines,
                 self._time_display()
             )
@@ -1281,6 +1324,12 @@ class NukerisPanel(QtWidgets.QWidget):
         )
         base_y = controls_y + 24.0
 
+        if width < 500:
+            p.setFont(self._font(10, QC.FontNormal))
+            p.setPen(t['text'])
+            for i, text in enumerate(('A/D MOVE   Q/E ROTATE   C HOLD', 'S DOWN   SPACE/W DROP   ESC PAUSE')):
+                p.drawText(QtCore.QRectF(margin, base_y+i*23, width-2*margin, 20), QC.AlignLeft, text)
+            return
         rows = [
             [
                 (("A", "D"), "↔", "MOVE"),
@@ -1341,6 +1390,8 @@ class NukerisPanel(QtWidgets.QWidget):
             title = "PAUSED"
             sub = "Ranked timer is still running." if self.session and self.session.ranked else "CLICK BOARD OR PRESS SPACE"
 
+        if self._starting_online:
+            title, sub = 'READY', 'Requesting a Global run...'
         if not title:
             return
 
@@ -1352,7 +1403,7 @@ class NukerisPanel(QtWidgets.QWidget):
 
         p.setPen(t["text"])
         p.setFont(self._font(20, QC.FontDemiBold))
-        center_y = board.center().y() - 19
+        center_y = board.center().y() - 40
         p.drawText(
             QtCore.QRectF(board.left(), center_y, board.width(), 28),
             QC.AlignCenter,
@@ -1362,11 +1413,16 @@ class NukerisPanel(QtWidgets.QWidget):
         p.setPen(t["muted"])
         p.setFont(self._font(10, QC.FontMedium))
         p.drawText(
-            QtCore.QRectF(board.left(), center_y + 31, board.width(), 20),
-            QC.AlignCenter,
+            QtCore.QRectF(board.left()+4, center_y + 31, board.width()-8, 70),
+            QC.AlignCenter | _enum_value(QtCore.Qt,"TextFlag","TextWordWrap"),
             sub,
         )
 
+        if self.result_status and not self.error_text:
+            p.setPen(t['muted'])
+            p.setFont(self._font(9))
+            status = QtGui.QFontMetrics(p.font()).elidedText(self.result_status, QC.ElideRight, int(board.width()-12))
+            p.drawText(QtCore.QRectF(board.left()+6, board.bottom()-24, board.width()-12, 18), QC.AlignCenter, status)
         if self.error_text:
             p.setPen(t["faint"])
             p.setFont(self._font(8))

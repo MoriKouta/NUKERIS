@@ -1,0 +1,66 @@
+"""Isolated Qt smoke/visual checks; does not launch or import real Nuke."""
+import os
+import sys
+import tempfile
+import shutil
+import types
+
+if len(sys.argv) > 1:
+    sys.path.insert(0, sys.argv[1])
+os.environ['QT_QPA_PLATFORM'] = 'offscreen'
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+nuke = types.ModuleType('nuke')
+nuke.GUI = False
+sys.modules['nuke'] = nuke
+scripts = types.ModuleType('nukescripts')
+scripts.panels = None
+sys.modules['nukescripts'] = scripts
+import nukeris
+QtWidgets, QtGui, QtCore = nukeris.QtWidgets, nukeris.QtGui, nukeris.QtCore
+app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+font_path = 'C:/Windows/Fonts/arial.ttf'
+if os.path.exists(font_path):
+    font_id = QtGui.QFontDatabase.addApplicationFont(font_path)
+    families = QtGui.QFontDatabase.applicationFontFamilies(font_id)
+    if families:
+        app.setFont(QtGui.QFont(families[0], 10))
+palette = app.palette()
+for role, color in [('Window','#353535'),('WindowText','#D0D0D0'),('Base','#292929'),('Text','#D0D0D0'),('Button','#444444'),('ButtonText','#DDDDDD')]:
+    palette.setColor(nukeris._enum_value(QtGui.QPalette,'ColorRole',role),QtGui.QColor(color))
+app.setPalette(palette)
+folder = tempfile.mkdtemp(prefix='nukeris-qt-')
+nukeris.user_settings_path = lambda: os.path.join(folder,'settings.json')
+try:
+    panel = nukeris.NukerisPanel()
+    assert panel.network.transport.manager is None
+    assert not panel.preferences['global_enabled']
+    assert not panel.preferences['studio_enabled']
+    for w,h,name in [(800,800,'standard'),(360,600,'compact')]:
+        panel.resize(w,h)
+        panel.show()
+        app.processEvents()
+        assert not panel.error_text, panel.error_text
+        if len(sys.argv)>2:
+            panel.grab().save(os.path.join(sys.argv[2],name+'.png'))
+    panel._new_game()
+    engine = panel.engine
+    panel.resize(900,900)
+    app.processEvents()
+    assert panel.engine is engine
+    panel._set_paused(True,True)
+    assert not panel._timer.isActive()
+    for dialog_class in (nukeris.SettingsDialog,nukeris.RankingDialog):
+        dialog=dialog_class(panel)
+        dialog.show()
+        app.processEvents()
+        if len(sys.argv)>2:
+            dialog.grab().save(os.path.join(sys.argv[2],dialog_class.__name__+'.png'))
+        dialog.close()
+    assert not panel.error_text, panel.error_text
+    panel.close()
+    app.processEvents()
+    from qt_network_checks import run
+    run(nukeris,app)
+    print('Qt smoke passed:', nukeris.QT_BINDING, QtCore.qVersion())
+finally:
+    shutil.rmtree(folder)

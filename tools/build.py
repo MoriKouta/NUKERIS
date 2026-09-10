@@ -5,7 +5,7 @@ import os
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PARTS = ['core.py', 'geometry.py', 'modes.py', 'settings.py', 'studio.py', 'ui.py']
+PARTS = ['core.py', 'geometry.py', 'modes.py', 'settings.py', 'studio.py', 'global_client.py', 'ui.py']
 
 def build(include_ui=True):
     parts = []
@@ -18,6 +18,8 @@ def build(include_ui=True):
                 with io.open(os.path.join(ROOT, 'src', 'storage.py'), encoding='utf-8') as storage:
                     text = text.replace('def _settings_path():', storage.read() + '\n\ndef _settings_path():', 1)
             if name == 'ui.py':
+                with io.open(os.path.join(ROOT, 'src', 'network.py'), encoding='utf-8') as network:
+                    text = text.replace('class NukerisPanel', network.read() + '\n\nclass NukerisPanel', 1)
                 with io.open(os.path.join(ROOT, 'src', 'dialogs.py'), encoding='utf-8') as dialogs:
                     text = text.replace('class NukerisPanel', dialogs.read() + '\n\nclass NukerisPanel', 1)
             parts.append(text)

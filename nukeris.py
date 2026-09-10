@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-NUKERIS v1.1.0
+NUKERIS v1.2.0
 A small, isolated compositing-themed tetromino game for Foundry Nuke 12+.
 
 Safety design:
@@ -43,7 +43,7 @@ from collections import deque
 _monotonic = getattr(time, "monotonic", time.time)
 
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 PANEL_TITLE = "NUKERIS"
 PANEL_ID = "com.mori.nukeris.panel"
 
@@ -618,11 +618,20 @@ def user_settings_path():
     return os.path.join(os.path.expanduser('~'), '.nuke', 'NUKERIS', 'settings.json')
 
 
+try:
+    STRING_TYPES = (basestring,)
+    INTEGER_TYPES = (int, long)
+except NameError:
+    STRING_TYPES = (str,)
+    INTEGER_TYPES = (int,)
+
+
 def validate_profile(profile):
-    return (isinstance(profile, dict) and
-            re.match(r'^[A-Za-z0-9_.-]{2,16}$', profile.get('nickname', '')) is not None and
-            re.match(r'^[A-Z]{2}$', profile.get('country', '')) is not None and
-            re.match(r'^[A-Z0-9 ._-]{1,32}$', profile.get('region', '')) is not None)
+    if not isinstance(profile, dict) or not all(isinstance(profile.get(k), STRING_TYPES) for k in ('nickname','country','region')):
+        return False
+    return (re.match(r'^[A-Za-z0-9_.-]{2,16}$', profile['nickname']) is not None and
+            profile['country'] in COUNTRY_CODES and
+            re.match(r'^[A-Z0-9 ._-]{1,32}$', profile['region']) is not None)
 
 
 def valid_result(result, ranked_only=True):
@@ -634,9 +643,11 @@ def valid_result(result, ranked_only=True):
         return False
     for field, maximum in (('score', 100000000), ('time_ms', 86400000), ('lines', 10000), ('pieces', 25000)):
         value = result.get(field)
-        if isinstance(value, bool) or not isinstance(value, int) or value < 0 or value > maximum:
+        if isinstance(value, bool) or not isinstance(value, INTEGER_TYPES) or value < 0 or value > maximum:
             return False
-    if result['lines'] > result['pieces'] * 4 or result['score'] > result['pieces'] * 50000:
+    level = 1 + result['lines'] // 10
+    bound = 40*result['pieces'] + 200*level*result['lines'] + 25*level*result['lines']*max(0,result['lines']-1)
+    if result['lines']*10 > result['pieces']*4 or result['score'] > bound:
         return False
     if result['mode'] == SCORE_ATTACK:
         return 0 < result['time_ms'] <= 120000 and result['pieces'] <= 2400
@@ -724,7 +735,7 @@ class SettingsStore(JsonStore):
         return self.update(merge) is not None
 
     def personal(self):
-        results = self.read()['ranked_pbs']
+        results = {k:v for k,v in self.read()['ranked_pbs'].items() if valid_result(v)}
         for key, value in self.pending_results.items():
             if not valid_result(results.get(key)) or better_result(value, results[key]):
                 results[key] = value
@@ -798,11 +809,97 @@ class StudioRanking(object):
         except Exception:
             return dict(ok=False, entries=[], message='Studio folder is unavailable. Personal records are safe.')
 
+# The maintainer sets the official HTTPS origin after an approved deployment.
+# Empty by default: this distribution has no live backend configured.
+GLOBAL_ENDPOINT = ''
+
+
+class GlobalRankingClient(object):
+    def __init__(self, settings, transport, endpoint=GLOBAL_ENDPOINT):
+        self.settings = settings
+        self.transport = transport
+        self.endpoint = endpoint.rstrip('/')
+        self.enabled = settings.read()['global_enabled']
+        self.generation = 0
+
+    def configure(self, enabled):
+        self.enabled = bool(enabled)
+        self.generation += 1
+        if not self.enabled:
+            self.transport.cancel()
+
+    def request(self, method, path, body, callback, authenticated=True):
+        if not self.enabled:
+            callback(dict(ok=False, error='Global ranking is off.'))
+            return
+        if not re.match(r'^https://[A-Za-z0-9.-]+(?::[0-9]+)?$', self.endpoint):
+            callback(dict(ok=False, error='The official Global endpoint is not configured.'))
+            return
+        token = self.settings.read()['player_token'] if authenticated else ''
+        if authenticated and not re.match(r'^[a-f0-9]{64}$', token):
+            callback(dict(ok=False, error='Create an online profile first.'))
+            return
+        generation = self.generation
+        def complete(response):
+            if generation != self.generation or not self.enabled:
+                callback(dict(ok=False,error='Global ranking was disabled.'))
+            elif not isinstance(response, dict) or response.get('ok') is not True:
+                callback(dict(ok=False,error='Global request failed. Personal records are safe.'))
+            else:
+                callback(response)
+        self.transport.request(method,self.endpoint+path,body,token,complete)
+
+    def register(self, callback):
+        profile = self.settings.read()['profile']
+        if not validate_profile(profile):
+            callback(dict(ok=False,error='Set your nickname, country and region in Settings.'))
+            return
+        def done(r):
+            if r.get('ok'):
+                if not (isinstance(r.get('player_id'), type(u'')) and re.match(r'^[a-f0-9-]{36}$',r['player_id']) and
+                        isinstance(r.get('player_token'), type(u'')) and re.match(r'^[a-f0-9]{64}$',r['player_token'])):
+                    r = dict(ok=False,error='Invalid profile response.')
+                elif not self.settings.save_preferences(dict(player_id=r['player_id'],player_token=r['player_token'])):
+                    r = dict(ok=False,error='Online identity could not be saved. Check local settings permissions.')
+            callback(r)
+        self.request('POST','/v1/players',dict(profile=profile,version=__version__),done,False)
+
+    def update_profile(self, callback):
+        self.request('POST','/v1/profile',dict(profile=self.settings.read()['profile'],version=__version__),callback)
+
+    def start_run(self, mode, callback):
+        def done(r):
+            if r.get('ok') and not (isinstance(r.get('run_token'),type(u'')) and
+                    re.match(r'^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$',r['run_token']) and len(r['run_token'])<=2048 and
+                    isinstance(r.get('seed'),type(u'')) and re.match(r'^[a-f0-9]{16}$',r['seed'])):
+                r = dict(ok=False,error='Invalid start response.')
+            callback(r)
+        self.request('POST','/v1/runs',dict(mode=mode,ruleset=RULESET,version=__version__),done)
+
+    def submit(self, token, result, callback):
+        if not valid_result(result):
+            callback(dict(ok=False,error='Result is not eligible for Global ranking.'))
+            return
+        fields = ('mode','ruleset','version','score','time_ms','lines','pieces')
+        self.request('POST','/v1/results',dict(run_token=token,result={k:result[k] for k in fields}),callback)
+
+    def leaderboard(self, mode, callback):
+        def done(r):
+            if r.get('ok'):
+                entries, ranks = r.get('entries'), r.get('ranks')
+                if (not isinstance(entries,list) or len(entries)>100 or
+                        not all(valid_result(row) and row['mode']==mode and validate_profile(row) for row in entries) or
+                        not isinstance(ranks,dict) or any(k not in ranks or (ranks[k] is not None and
+                        (isinstance(ranks[k],bool) or not isinstance(ranks[k],int) or ranks[k]<1)) for k in ('world','country','region'))):
+                    r = dict(ok=False,error='Invalid ranking response.')
+            callback(r)
+        self.request('GET','/v1/leaderboard?mode='+mode+'&ruleset='+RULESET+'&version='+__version__,None,done)
+
 try:
-    from PySide6 import QtCore, QtGui, QtWidgets
+    from PySide6 import QtCore, QtGui, QtWidgets, QtNetwork
     QT_BINDING = "PySide6"
 except ImportError:
-    from PySide2 import QtCore, QtGui, QtWidgets
+    from PySide2 import QtCore, QtGui, QtWidgets, QtNetwork
     QT_BINDING = "PySide2"
 
 
@@ -860,6 +957,73 @@ QC.FontNormal = _enum_value(QtGui.QFont, "Weight", "Normal")
 QC.FontMedium = _enum_value(QtGui.QFont, "Weight", "Medium")
 QC.FontDemiBold = _enum_value(QtGui.QFont, "Weight", "DemiBold")
 QC.Antialiasing = _enum_value(QtGui.QPainter, "RenderHint", "Antialiasing")
+
+
+class QtNetworkTransport(QtCore.QObject):
+    """Lazy asynchronous HTTP, bounded responses, hard timeout, no redirects."""
+    def __init__(self, parent=None):
+        QtCore.QObject.__init__(self,parent)
+        self.manager = None
+        self.pending = set()
+        self.timeout_ms = 10000
+
+    def cancel(self):
+        for reply in list(self.pending):
+            reply.abort()
+
+    def request(self, method, url, body, token, callback):
+        if len(self.pending)>=2:
+            callback(dict(ok=False))
+            return
+        if self.manager is None:
+            self.manager = QtNetwork.QNetworkAccessManager(self)
+            self.manager.setProxy(QtNetwork.QNetworkProxy(_enum_value(QtNetwork.QNetworkProxy,'ProxyType','NoProxy')))
+        request = QtNetwork.QNetworkRequest(QtCore.QUrl(url))
+        request.setRawHeader(b'User-Agent',('NUKERIS/'+__version__).encode('ascii'))
+        request.setRawHeader(b'Accept',b'application/json')
+        for attr in ('CookieLoadControlAttribute','CookieSaveControlAttribute','AuthenticationReuseAttribute'):
+            request.setAttribute(_enum_value(QtNetwork.QNetworkRequest,'Attribute',attr),
+                                 _enum_value(QtNetwork.QNetworkRequest,'LoadControl','Manual'))
+        request.setAttribute(_enum_value(QtNetwork.QNetworkRequest,'Attribute','RedirectPolicyAttribute'),
+                             _enum_value(QtNetwork.QNetworkRequest,'RedirectPolicy','ManualRedirectPolicy'))
+        if token:
+            request.setRawHeader(b'Authorization',('Bearer '+token).encode('ascii'))
+        if method == 'GET':
+            reply = self.manager.get(request)
+        else:
+            request.setRawHeader(b'Content-Type',b'application/json')
+            reply = self.manager.post(request,QtCore.QByteArray(json.dumps(body,allow_nan=False).encode('utf-8')))
+        self.pending.add(reply)
+        reply.setReadBufferSize(16384)
+        data = [bytearray()]
+        timer = QtCore.QTimer(reply)
+        timer.setSingleShot(True)
+        timer.timeout.connect(reply.abort)
+        timer.start(self.timeout_ms)
+        def read():
+            data[0].extend(bytes(reply.readAll()))
+            if len(data[0])>131072:
+                reply.abort()
+        def finish():
+            timer.stop()
+            read()
+            self.pending.discard(reply)
+            value = dict(ok=False)
+            try:
+                status = reply.attribute(_enum_value(QtNetwork.QNetworkRequest,'Attribute','HttpStatusCodeAttribute'))
+                no_error = _enum_value(QtNetwork.QNetworkReply,'NetworkError','NoError')
+                if reply.error()==no_error and status is not None and 200<=int(status)<300 and len(data[0])<=131072:
+                    value = json.loads(bytes(data[0]).decode('utf-8'))
+            except (ValueError,TypeError,UnicodeError):
+                pass
+            reply.deleteLater()
+            try:
+                callback(value)
+            except RuntimeError:
+                pass  # A UI receiver may have closed during the request.
+        reply.readyRead.connect(read)
+        reply.finished.connect(finish)
+        reply.sslErrors.connect(lambda _errors: reply.abort())
 
 
 import threading
@@ -985,6 +1149,9 @@ class RankingDialog(QtWidgets.QDialog):
         layout.addWidget(self.scope)
         layout.addWidget(self.mode)
         layout.addWidget(self.refresh)
+        self.profile_button = QtWidgets.QPushButton('CREATE / UPDATE ONLINE PROFILE')
+        self.profile_button.clicked.connect(self.profile_action)
+        layout.addWidget(self.profile_button)
         self.table = QtWidgets.QTableWidget(0,4)
         self.table.setHorizontalHeaderLabels(['#','PLAYER','AREA','RESULT'])
         self.table.setEditTriggers(_enum_value(QtWidgets.QAbstractItemView,'EditTrigger','NoEditTriggers'))
@@ -995,13 +1162,24 @@ class RankingDialog(QtWidgets.QDialog):
         layout.addWidget(self.status)
         self.ranks = QtWidgets.QLabel()
         layout.addWidget(self.ranks)
+        self.scope.currentIndexChanged.connect(self.selection_changed)
+        self.mode.currentIndexChanged.connect(self.selection_changed)
+        self.profile_button.setVisible(False)
         self.load()
+
+    def selection_changed(self):
+        self.profile_button.setVisible(self.scope.currentIndex()==2)
+        self.table.setRowCount(0)
+        self.ranks.setText('')
+        self.status.setText('Press REFRESH to load this ranking.')
 
     def load(self):
         mode = MODES[self.mode.currentIndex()+1]
         scope = self.scope.currentIndex()
         self.table.setRowCount(0)
         self.ranks.setText('')
+        self.scope.setEnabled(False)
+        self.mode.setEnabled(False)
         if scope == 0:
             r = self.panel.settings.personal().get(mode+'/'+RULESET)
             self.display(dict(ok=True,entries=[dict(r,nickname='YOU',country='',region='')] if r else []))
@@ -1012,9 +1190,33 @@ class RankingDialog(QtWidgets.QDialog):
             store = self.panel._studio_store()
             run_ranking_io(lambda: store.read(mode), self.display)
         else:
-            self.status.setText('Global ranking is not configured yet. Personal records are safe.')
+            self.refresh.setEnabled(False)
+            self.status.setText('Loading Global ranking...')
+            self.panel.network.leaderboard(mode, self.global_display)
 
+    def profile_action(self):
+        self.profile_button.setEnabled(False)
+        def done(response):
+            self.profile_button.setEnabled(True)
+            self.status.setText('Online profile saved.' if response.get('ok') else response.get('error','Profile request failed.'))
+        if self.panel.settings.read()['player_id']:
+            self.panel.network.update_profile(done)
+        else:
+            self.panel.network.register(done)
+
+    def global_display(self, response):
+        if not response.get('ok'):
+            self.display(dict(ok=False,entries=[],message=response.get('error','Global request failed.')))
+            return
+        self.display(response)
+        ranks = response['ranks']
+        self.ranks.setText('YOUR RANK   WORLD {0}   COUNTRY {1}   REGION {2}'.format(
+            *['#'+str(ranks[k]) if ranks[k] is not None else '--' for k in ('world','country','region')]))
+
+    @QtCore.Slot(object)
     def display(self, response):
+        self.scope.setEnabled(True)
+        self.mode.setEnabled(True)
         self.refresh.setEnabled(True)
         entries = response.get('entries', [])
         self.table.setRowCount(len(entries))
@@ -1039,6 +1241,11 @@ class NukerisPanel(QtWidgets.QWidget):
 
         self.settings = SettingsStore()
         self.preferences = self.settings.read()
+        self.network = GlobalRankingClient(self.settings, QtNetworkTransport(self))
+        self._run_token = None
+        self._starting_online = False
+        self._start_serial = 0
+        self.result_status = ''
         self.session = None
         self.engine = GameEngine(storage=self.settings)
         self.started = False
@@ -1230,11 +1437,36 @@ class NukerisPanel(QtWidgets.QWidget):
 
     def _new_game(self) :
         mode = MODES[self._mode_combo.currentIndex()]
-        self.session = GameSession(mode, storage=self.settings)
-        self._result_recorded = False
+        self._start_serial += 1
+        serial = self._start_serial
+        self._run_token = None
+        self._starting_online = False
+        if mode != NORMAL and self.preferences['global_enabled']:
+            self._set_paused(True, release_input=True)
+            self._starting_online = True
+            self.result_status = 'Starting Global run...'
+            def ready(response):
+                if serial != self._start_serial:
+                    return
+                self._starting_online = False
+                if response.get('ok'):
+                    self._run_token = response['run_token']
+                    self.result_status = 'GLOBAL RUN'
+                    self._begin_game(mode, int(response['seed'],16))
+                else:
+                    self.result_status = response.get('error','Global unavailable.') + ' Playing locally.'
+                    self._begin_game(mode)
+            self.network.start_run(mode, ready)
+        else:
+            self.result_status = ''
+            self._begin_game(mode)
+
+    def _begin_game(self, mode, seed=None):
+        self.session = GameSession(mode, storage=self.settings, seed=seed)
         self.engine = self.session.engine
+        self._result_recorded = False
         self.started = True
-        self.paused = False
+        self.paused = not self.hasFocus()
         self.error_text = ""
         self._fall_accum_ms = 0.0
         self._active_seconds = 0.0
@@ -1269,6 +1501,7 @@ class NukerisPanel(QtWidgets.QWidget):
         self.update()
 
     def hideEvent(self, event) :
+        self._check_session()
         if self.started and not self.engine.game_over:
             self.paused = True
         self.input_active = False
@@ -1331,6 +1564,9 @@ class NukerisPanel(QtWidgets.QWidget):
 
     def keyPressEvent(self, event) :
         try:
+            if self._starting_online:
+                event.accept()
+                return
             if not self.hasFocus() or event.modifiers() & (QC.ControlModifier | QC.AltModifier | QC.MetaModifier):
                 event.ignore()
                 return
@@ -1405,6 +1641,7 @@ class NukerisPanel(QtWidgets.QWidget):
                 handled = False
 
             if handled:
+                self._check_session()
                 self.update()
                 event.accept()
             else:
@@ -1422,10 +1659,17 @@ class NukerisPanel(QtWidgets.QWidget):
 
     def _record_result(self, result):
         if result and result['mode'] != NORMAL:
-            self.settings.record(result)
+            saved = self.settings.record(result)
+            self.result_status = 'PERSONAL RECORD SAVED' if saved else 'Personal result kept in memory; save failed.'
+            if self._run_token and self.preferences['global_enabled']:
+                self.network.submit(self._run_token,result,self._submission_finished)
             if self.preferences['studio_enabled']:
                 store = self._studio_store()
                 run_ranking_io(lambda: store.publish(result))
+
+    def _submission_finished(self, response):
+        self.result_status = 'GLOBAL RESULT SUBMITTED' if response.get('ok') else 'Global submission failed. Personal record is safe.'
+        self.update()
 
     def _studio_store(self):
         p = self.preferences
@@ -1478,6 +1722,7 @@ class NukerisPanel(QtWidgets.QWidget):
                 self._fall_accum_ms = 0.0
                 self.session.action('gravity_step')
                 self._capture_clear_fx()
+                self._check_session()
 
             if self.engine.game_over or (self.session and self.session.finished):
                 self.paused = True
@@ -2142,7 +2387,7 @@ class NukerisPanel(QtWidgets.QWidget):
         p.setFont(self._font(13, QC.FontMedium))
         p.setPen(t["text"])
         text = (
-            "SCORE {0:,}    LV {1:02d}    LINES {2:03d}    TIME {3}".format(
+            "SCORE {0:,}    LV {1:02d}    LINES {2:03d}".format(
                 self.engine.score, self.engine.level, self.engine.lines,
                 self._time_display()
             )
@@ -2246,6 +2491,12 @@ class NukerisPanel(QtWidgets.QWidget):
         )
         base_y = controls_y + 24.0
 
+        if width < 500:
+            p.setFont(self._font(10, QC.FontNormal))
+            p.setPen(t['text'])
+            for i, text in enumerate(('A/D MOVE   Q/E ROTATE   C HOLD', 'S DOWN   SPACE/W DROP   ESC PAUSE')):
+                p.drawText(QtCore.QRectF(margin, base_y+i*23, width-2*margin, 20), QC.AlignLeft, text)
+            return
         rows = [
             [
                 (("A", "D"), "↔", "MOVE"),
@@ -2306,6 +2557,8 @@ class NukerisPanel(QtWidgets.QWidget):
             title = "PAUSED"
             sub = "Ranked timer is still running." if self.session and self.session.ranked else "CLICK BOARD OR PRESS SPACE"
 
+        if self._starting_online:
+            title, sub = 'READY', 'Requesting a Global run...'
         if not title:
             return
 
@@ -2317,7 +2570,7 @@ class NukerisPanel(QtWidgets.QWidget):
 
         p.setPen(t["text"])
         p.setFont(self._font(20, QC.FontDemiBold))
-        center_y = board.center().y() - 19
+        center_y = board.center().y() - 40
         p.drawText(
             QtCore.QRectF(board.left(), center_y, board.width(), 28),
             QC.AlignCenter,
@@ -2327,11 +2580,16 @@ class NukerisPanel(QtWidgets.QWidget):
         p.setPen(t["muted"])
         p.setFont(self._font(10, QC.FontMedium))
         p.drawText(
-            QtCore.QRectF(board.left(), center_y + 31, board.width(), 20),
-            QC.AlignCenter,
+            QtCore.QRectF(board.left()+4, center_y + 31, board.width()-8, 70),
+            QC.AlignCenter | _enum_value(QtCore.Qt,"TextFlag","TextWordWrap"),
             sub,
         )
 
+        if self.result_status and not self.error_text:
+            p.setPen(t['muted'])
+            p.setFont(self._font(9))
+            status = QtGui.QFontMetrics(p.font()).elidedText(self.result_status, QC.ElideRight, int(board.width()-12))
+            p.drawText(QtCore.QRectF(board.left()+6, board.bottom()-24, board.width()-12, 18), QC.AlignCenter, status)
         if self.error_text:
             p.setPen(t["faint"])
             p.setFont(self._font(8))

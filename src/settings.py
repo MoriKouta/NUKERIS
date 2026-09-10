@@ -11,11 +11,20 @@ def user_settings_path():
     return os.path.join(os.path.expanduser('~'), '.nuke', 'NUKERIS', 'settings.json')
 
 
+try:
+    STRING_TYPES = (basestring,)
+    INTEGER_TYPES = (int, long)
+except NameError:
+    STRING_TYPES = (str,)
+    INTEGER_TYPES = (int,)
+
+
 def validate_profile(profile):
-    return (isinstance(profile, dict) and
-            re.match(r'^[A-Za-z0-9_.-]{2,16}$', profile.get('nickname', '')) is not None and
-            re.match(r'^[A-Z]{2}$', profile.get('country', '')) is not None and
-            re.match(r'^[A-Z0-9 ._-]{1,32}$', profile.get('region', '')) is not None)
+    if not isinstance(profile, dict) or not all(isinstance(profile.get(k), STRING_TYPES) for k in ('nickname','country','region')):
+        return False
+    return (re.match(r'^[A-Za-z0-9_.-]{2,16}$', profile['nickname']) is not None and
+            profile['country'] in COUNTRY_CODES and
+            re.match(r'^[A-Z0-9 ._-]{1,32}$', profile['region']) is not None)
 
 
 def valid_result(result, ranked_only=True):
@@ -27,9 +36,11 @@ def valid_result(result, ranked_only=True):
         return False
     for field, maximum in (('score', 100000000), ('time_ms', 86400000), ('lines', 10000), ('pieces', 25000)):
         value = result.get(field)
-        if isinstance(value, bool) or not isinstance(value, int) or value < 0 or value > maximum:
+        if isinstance(value, bool) or not isinstance(value, INTEGER_TYPES) or value < 0 or value > maximum:
             return False
-    if result['lines'] > result['pieces'] * 4 or result['score'] > result['pieces'] * 50000:
+    level = 1 + result['lines'] // 10
+    bound = 40*result['pieces'] + 200*level*result['lines'] + 25*level*result['lines']*max(0,result['lines']-1)
+    if result['lines']*10 > result['pieces']*4 or result['score'] > bound:
         return False
     if result['mode'] == SCORE_ATTACK:
         return 0 < result['time_ms'] <= 120000 and result['pieces'] <= 2400
@@ -117,7 +128,7 @@ class SettingsStore(JsonStore):
         return self.update(merge) is not None
 
     def personal(self):
-        results = self.read()['ranked_pbs']
+        results = {k:v for k,v in self.read()['ranked_pbs'].items() if valid_result(v)}
         for key, value in self.pending_results.items():
             if not valid_result(results.get(key)) or better_result(value, results[key]):
                 results[key] = value
