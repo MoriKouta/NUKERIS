@@ -22,9 +22,9 @@ except NameError:
 def validate_profile(profile):
     if not isinstance(profile, dict) or not all(isinstance(profile.get(k), STRING_TYPES) for k in ('nickname','country','region')):
         return False
-    return (re.match(r'^[A-Za-z0-9_.-]{2,16}$', profile['nickname']) is not None and
+    return (re.match(r'^[A-Za-z0-9_.-]{2,16}\Z', profile['nickname']) is not None and
             profile['country'] in COUNTRY_CODES and
-            re.match(r'^[A-Z0-9 ._-]{1,32}$', profile['region']) is not None)
+            re.match(r'^[A-Z0-9 ._-]{1,32}\Z', profile['region']) is not None)
 
 
 def valid_result(result, ranked_only=True):
@@ -75,7 +75,9 @@ class SettingsStore(JsonStore):
         for key in ('studio_folder','studio_player_id','player_id','player_token'):
             if isinstance(current.get(key), type(u'')) or isinstance(current.get(key), str):
                 defaults[key] = current[key]
-        defaults['pbs'] = dict(settings_defaults()['pbs'], **defaults['pbs'])
+        defaults['pbs'] = {k:defaults['pbs'].get(k,v) for k,v in settings_defaults()['pbs'].items()}
+        if not validate_profile(defaults['profile']):
+            defaults['profile'] = {}
         return defaults
 
     def update(self, change):

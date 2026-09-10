@@ -1,31 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-NUKERIS v1.2.0
-A small, isolated compositing-themed tetromino game for Foundry Nuke 12+.
-
-Safety design:
-- Does not read or modify the current .nk script.
-- Does not create/select/change nodes, viewers, frames, knobs, or undo state.
-- No Nuke callbacks, no threads, no global event filters, no global shortcuts.
-- Uses Qt ShortcutOverride only on this focused widget so Nuke single-key actions do not fire while playing.
-- Writes only nukeris_settings.json next to this script to persist the best score.
-- The game timer stops while paused or hidden.
-- Keyboard input is handled only while this widget owns focus.
-
-Install:
-1. Copy nukeris.py directly into your .nuke folder.
-   Windows: C:/Users/<USERNAME>/.nuke/nukeris.py
-   Linux:   ~/.nuke/nukeris.py
-2. Add this line to your existing menu.py:
-       import nukeris
-3. Restart Nuke, then open Pane > NUKERIS.
-
-No init.py edit is required.
-
-Compatibility:
-- Nuke 12.x: Python 2.7 + PySide2
-- Nuke 13.x-15.x: Python 3 + PySide2
-- Nuke 16.x-17.x: Python 3 + PySide6
+NUKERIS v1.2.0 Arcade Update. Generated distribution: edit src/, run tools/build.py.
+Single-file installation: copy nukeris.py to .nuke, import it from menu.py.
+Nuke 12 (Python 2.7/PySide2), 13-15 (Python 3/PySide2), 16-17 (Python 3/PySide6).
+Windows and Linux remain support targets; see docs/TESTING.md for actual evidence.
+Offline by default: importing/opening starts no network or shared-folder requests.
+Nuke integration is panel registration only, with no comp/project inspection.
+Personal settings: ~/.nuke/NUKERIS/settings.json. Legacy PB migration keeps the old file.
+Explicitly enabled Studio uses bounded on-demand file I/O workers; Global uses async HTTPS.
+No telemetry, analytics, discovery, listening ports, services, auto-update or geolocation.
+Gameplay stops on focus loss; ranked competition clocks continue to elapse.
 """
 
 from __future__ import division, print_function, unicode_literals

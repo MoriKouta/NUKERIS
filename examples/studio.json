@@ -1,0 +1,5 @@
+{
+  "schema": 1,
+  "name": "Studio Ranking",
+  "description": "Optional operator metadata. NUKERIS reads only scores under this root."
+}

@@ -1,3 +1,4 @@
+import {COUNTRIES} from './countries.mjs';
 export const VERSION = '1.2.0';
 export const RULESET = 'ruleset_1';
 export const MODES = ['score_attack_120', 'sprint_40'];
@@ -17,9 +18,9 @@ export async function tokenHash(token) {
 }
 
 export function validProfile(p) {
-  return only(p, profileFields) && typeof p.nickname === 'string' && /^[A-Za-z0-9_.-]{2,16}$/.test(p.nickname)
-    && typeof p.country === 'string' && /^[A-Z]{2}$/.test(p.country)
-    && typeof p.region === 'string' && /^[A-Z0-9 ._-]{1,32}$/.test(p.region);
+  return only(p, profileFields) && typeof p.nickname === 'string' && /^[A-Za-z0-9_.-]{2,16}$/.test(p.nickname) && p.nickname.trim()===p.nickname
+    && typeof p.country === 'string' && COUNTRIES.has(p.country)
+    && typeof p.region === 'string' && /^[A-Z0-9 ._-]{1,32}$/.test(p.region) && p.region.trim()===p.region;
 }
 
 export function validResult(r) {
@@ -152,6 +153,7 @@ export default {
           .bind(id,await tokenHash(token),body.profile.nickname,body.profile.country,body.profile.region).run();
         return response({ok:true,player_id:id,player_token:token},201);
       }
+      check((await env.REQUEST_LIMITER.limit({key:'public-requests'})).success,429,'Please try again later');
       const player=await authenticate(request,env);
       if(request.method==='POST' && url.pathname==='/v1/profile') {
         const body=await readBody(request);

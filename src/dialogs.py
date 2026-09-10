@@ -99,6 +99,8 @@ class SettingsDialog(QtWidgets.QDialog):
             self.message.setText(self.panel.settings.last_error)
             return
         self.panel.preferences = self.panel.settings.read()
+        self.panel._studio_cancel.set()
+        self.panel._studio_cancel = threading.Event()
         self.panel._grid_checkbox.setChecked(values['grid'])
         if hasattr(self.panel, 'network'):
             self.panel.network.configure(values['global_enabled'])

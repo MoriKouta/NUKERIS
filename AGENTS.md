@@ -38,17 +38,13 @@
 
 ## コード構成と責務
 
-2026-09-10 に確認した基準は v1.1.0、commit `f12d1769268468ed729f02601fef80759984f367`。将来の作業では現在の実ファイルを優先する。
-
-- 配布用コードは `nukeris.py` の単一ファイル。既存の `.nuke` への配置と `menu.py` からの import を保つ。
-- `_enum_value` と `QC`：Qt5／Qt6 の enum 差を吸収する。現在の import は PySide6 を試してから PySide2 に fallback する。
-- `Tetromino`／`PlacedCell`：ピース位置・回転と固定セルのデータ。
-- `GameEngine`：10×20 の盤面、7-bag、移動、SRS 回転、Hold、Next、Ghost、落下、固定、行消去、score／combo／level。
-- `NukerisPanel`：Qt widget、入力と focus、開始／pause、QTimer、レイアウト、描画。
-- `paintEvent` と `_draw_*`：QPainter によるノード風の装飾。ゲーム上の Read／Write 等は文字・図形であり、Nuke Node ではない。
-- `_settings_path`／`_load_best_score`／`_save_best_score`：モジュール隣の `nukeris_settings.json` の `best_score` を扱う。保存途中には `.tmp` も使う。
-- `register_panel`：GUI 時に Pane メニューへ登録する。module import の末尾で呼び出される。
-- GameEngine の処理は Qt／Nuke API を直接使わないが、現状は設定 I/O を呼び、ファイル全体の import には Qt が必要。完全に副作用のない単独 import 可能な engine として扱わない。
+- 単体配布用 `nukeris.py` は `tools/build.py` による生成物。編集は `src/` 内で行い、build と --check を実行する。
+- `core.py`：ピース／Engine／専用 RNG。`storage.py`：OS lock と安全な JSON 置換。`geometry.py`：直交 wire／layout。
+- `modes.py`：Normal／Score Attack／Sprint の clock と結果。`settings.py`：user directory、非破壊 migration、Personal PB。
+- `studio.py`：opt-in した指定共有先のみ。`global_client.py`：通信契約と検証。`network.py`：非同期 QtNetwork。
+- `ui.py`／`dialogs.py`：Qt UI、focus、描画、設定／ランキング。`backend/`：Workers／D1 source、SQL migration、local tests。
+- Nuke との接点は `nuke.GUI` 判定と `registerWidgetAsPanel` のみ。
+- 詳細・ruleset は `docs/ARCHITECTURE.md`、安全境界は `docs/SECURITY.md`、検証実績は `docs/TESTING.md` を参照する。
 
 ## 安全設計の維持
 
@@ -56,7 +52,7 @@
 - キーボード処理はパネルの focus 内に限定する。Nuke のショートカット設定を変更せず、global shortcut／global event filter を追加しない。
 - focus 喪失・非表示・pause・game over でゲーム timer を止める。Esc の入力解放を維持する。
 - ゲーム更新・入力・描画での例外を安全な停止へ導き、Nuke 起動や通常操作への影響を抑える。
-- アプリ全体の palette、font、乱数 generator、環境変数等の共有状態へ新たな副作用を追加しない。現行コードの共通 random 利用は改善検討事項として扱う。
+- アプリ全体の palette、font、乱数 generator、環境変数等の共有状態へ新たな副作用を追加しない。Engine 専用 RNG を維持する。
 - 設定に保存するのはゲームに必要な値だけ。comp 情報、素材 path、credential を保存しない。
 - 設定保存変更では、旧データの保持、書込不可、破損 JSON、複数パネル／複数プロセス、共有インストール先を考慮する。
 - 設定・一時ファイルを新しく作成する tests は一時領域と分離した I/O を使い、利用中の設定や current comp を変更しない。
@@ -74,20 +70,19 @@
 - Python 2.7 が構文解析できない f-string、関数 annotation、async 構文等を配布ファイルへ導入しない。新しい標準ライブラリ API には対応 target で動く fallback を用意する。
 - UTF-8 宣言、Unicode、除算、単調時計の fallback、Qt enum と描画 API の違いを考慮する。
 - Qt binding の import 成功や構文検査成功だけで Nuke／OS の動作確認済みと判定しない。
-- 現在の CI は `.github/workflows/compatibility.yml`。Python 3.11 と Docker の Python 2.7 で `nukeris.py` と存在する `nukeris_dev_*.py` の構文を確認する。
-- 2026-09-10 の基準では専用 tests ディレクトリと engine／settings／UI の自動 regression tests はない。存在しないテストを実行済みと報告しない。
+- 現在の CI は `.github/workflows/compatibility.yml`。各 Python と両 binding の実行テストを維持する。
+- `tests/` と `backend/test/` の regression tests を維持する。実行していないテストは成功と報告しない。
 - engine や settings の挙動変更には変更リスクに対応する分離 tests を用意する。UI のみの軽微な変更は必要な表示・操作確認を選ぶ。
 - UI／入力変更では両 binding、dock／float、focus 喪失、Esc、modifier 付きキー、非表示、再表示、panel 再作成を対象に検証する。
 - 実機検証の記録には Nuke の完全な version、OS、Python、PySide、検証項目と結果を残す。未実施は明記する。
 
-## 調査で見つかった未解決事項
+## 検証と未確認の扱い
 
-- settings 保存は固定 `.tmp` と remove＋rename であり、atomic な置換ではない。rename 失敗時の旧データ消失と複数 instance の score 後退を分離検証で再現した。
-- ゲームは module-level `random.shuffle` を使い、Nuke プロセス内の他の Python 処理と乱数状態を共有する。
-- `keyPressEvent` 自体には Ctrl／Alt／Meta 判定がないため、ShortcutOverride に任せた modifier の扱いを実機で確認する。
-- `.gitignore` は Python cache と OS 雑ファイルのみを除外し、settings／`.tmp`／`.env` 等は除外していない。
-- branch 保護、Issue／PR、CI の状態は変化するため、必要時に GitHub の現状を読み直す。
-- これらは調査所見であり、この文書の採用だけで修正や v1.2 実装を開始する許可にはならない。v1.2 は仕様・受入条件・対象 Issue が明確な依頼を受けてから着手する。
+- v1.1 調査時の保存競合、旧 JSON 消失経路、共通 RNG は修正し、regression tests で守る。
+- `python -m unittest discover -s tests -v`、`node --test backend/test/worker.test.mjs`、build --check、git diff --check を変更に応じて実行する。
+- UI／network 変更では、隔離 Qt runtime の `tests/run_qt.py` も実行する。実機確認と混同しない。
+- CI は Python 2.7、Windows／Linux Python3、両 Qt binding、backend を対象とする。CI 設定の存在だけで成功と報告しない。
+- NAS 実環境、全 Nuke version、Global 本番動作は別途確認する。branch 保護、Issue／PR、CI の状態は作業時に再確認する。
 
 ## 報告
 

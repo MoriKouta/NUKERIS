@@ -79,6 +79,7 @@ class NukerisPanel(QtWidgets.QWidget):
         self._starting_online = False
         self._start_serial = 0
         self.result_status = ''
+        self._studio_cancel = threading.Event()
         self.session = None
         self.engine = GameEngine(storage=self.settings)
         self.started = False
@@ -506,7 +507,7 @@ class NukerisPanel(QtWidgets.QWidget):
 
     def _studio_store(self):
         p = self.preferences
-        return StudioRanking(p['studio_enabled'], p['studio_folder'], p['studio_player_id'], p['profile'])
+        return StudioRanking(p['studio_enabled'], p['studio_folder'], p['studio_player_id'], p['profile'], self._studio_cancel.is_set)
 
     def _show_ranking(self):
         self._set_paused(True, release_input=True)

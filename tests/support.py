@@ -6,7 +6,7 @@ from build import build
 
 core = types.ModuleType('nukeris_test_core')
 core.__file__ = os.path.join(os.path.dirname(__file__), 'unused_module.py')
-eval(compile(build(False), 'nukeris-core', 'exec'), core.__dict__)
+eval(compile(build(False).encode('utf-8'), 'nukeris-core', 'exec'), core.__dict__)
 
 class MemoryStore(object):
     def __init__(self):

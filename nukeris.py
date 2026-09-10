@@ -1,31 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-NUKERIS v1.2.0
-A small, isolated compositing-themed tetromino game for Foundry Nuke 12+.
-
-Safety design:
-- Does not read or modify the current .nk script.
-- Does not create/select/change nodes, viewers, frames, knobs, or undo state.
-- No Nuke callbacks, no threads, no global event filters, no global shortcuts.
-- Uses Qt ShortcutOverride only on this focused widget so Nuke single-key actions do not fire while playing.
-- Writes only nukeris_settings.json next to this script to persist the best score.
-- The game timer stops while paused or hidden.
-- Keyboard input is handled only while this widget owns focus.
-
-Install:
-1. Copy nukeris.py directly into your .nuke folder.
-   Windows: C:/Users/<USERNAME>/.nuke/nukeris.py
-   Linux:   ~/.nuke/nukeris.py
-2. Add this line to your existing menu.py:
-       import nukeris
-3. Restart Nuke, then open Pane > NUKERIS.
-
-No init.py edit is required.
-
-Compatibility:
-- Nuke 12.x: Python 2.7 + PySide2
-- Nuke 13.x-15.x: Python 3 + PySide2
-- Nuke 16.x-17.x: Python 3 + PySide6
+NUKERIS v1.2.0 Arcade Update. Generated distribution: edit src/, run tools/build.py.
+Single-file installation: copy nukeris.py to .nuke, import it from menu.py.
+Nuke 12 (Python 2.7/PySide2), 13-15 (Python 3/PySide2), 16-17 (Python 3/PySide6).
+Windows and Linux remain support targets; see docs/TESTING.md for actual evidence.
+Offline by default: importing/opening starts no network or shared-folder requests.
+Nuke integration is panel registration only, with no comp/project inspection.
+Personal settings: ~/.nuke/NUKERIS/settings.json. Legacy PB migration keeps the old file.
+Explicitly enabled Studio uses bounded on-demand file I/O workers; Global uses async HTTPS.
+No telemetry, analytics, discovery, listening ports, services, auto-update or geolocation.
+Gameplay stops on focus loss; ranked competition clocks continue to elapse.
 """
 
 from __future__ import division, print_function, unicode_literals
@@ -629,9 +613,9 @@ except NameError:
 def validate_profile(profile):
     if not isinstance(profile, dict) or not all(isinstance(profile.get(k), STRING_TYPES) for k in ('nickname','country','region')):
         return False
-    return (re.match(r'^[A-Za-z0-9_.-]{2,16}$', profile['nickname']) is not None and
+    return (re.match(r'^[A-Za-z0-9_.-]{2,16}\Z', profile['nickname']) is not None and
             profile['country'] in COUNTRY_CODES and
-            re.match(r'^[A-Z0-9 ._-]{1,32}$', profile['region']) is not None)
+            re.match(r'^[A-Z0-9 ._-]{1,32}\Z', profile['region']) is not None)
 
 
 def valid_result(result, ranked_only=True):
@@ -682,7 +666,9 @@ class SettingsStore(JsonStore):
         for key in ('studio_folder','studio_player_id','player_id','player_token'):
             if isinstance(current.get(key), type(u'')) or isinstance(current.get(key), str):
                 defaults[key] = current[key]
-        defaults['pbs'] = dict(settings_defaults()['pbs'], **defaults['pbs'])
+        defaults['pbs'] = {k:defaults['pbs'].get(k,v) for k,v in settings_defaults()['pbs'].items()}
+        if not validate_profile(defaults['profile']):
+            defaults['profile'] = {}
         return defaults
 
     def update(self, change):
@@ -745,14 +731,18 @@ COUNTRY_CODES = 'AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF 
 
 class StudioRanking(object):
     """Trust-based PB files. Disabled operations do not inspect the filesystem."""
-    def __init__(self, enabled=False, folder='', player_id='', profile=None):
+    def __init__(self, enabled=False, folder='', player_id='', profile=None, cancelled=None):
         self.enabled = enabled
         self.folder = folder
         self.player_id = player_id
         self.profile = profile or {}
+        self.cancelled = cancelled or (lambda: False)
+
+    def is_enabled(self):
+        return self.enabled and not self.cancelled()
 
     def _directory(self, mode):
-        if not self.enabled or mode not in (SCORE_ATTACK, SPRINT) or not self.folder:
+        if not self.is_enabled() or mode not in (SCORE_ATTACK, SPRINT) or not self.folder:
             raise ValueError('Studio ranking is disabled or not configured')
         root = os.path.realpath(os.path.abspath(self.folder))
         path = os.path.join(root, 'scores', mode, RULESET)
@@ -762,9 +752,9 @@ class StudioRanking(object):
         return path
 
     def publish(self, result):
-        if not self.enabled:
+        if not self.is_enabled():
             return False
-        if not valid_result(result) or not re.match(r'^[a-f0-9]{32}$', self.player_id) or not validate_profile(self.profile):
+        if not valid_result(result) or not re.match(r'^[a-f0-9]{32}\Z', self.player_id) or not validate_profile(self.profile):
             return False
         try:
             if not os.path.isdir(self.folder):
@@ -776,6 +766,8 @@ class StudioRanking(object):
             value = dict(result, schema=1, player_id=self.player_id,
                          nickname=self.profile['nickname'], country=self.profile['country'], region=self.profile['region'])
             def merge(current):
+                if not self.is_enabled():
+                    raise IOError('Studio operation cancelled')
                 if valid_result(current) and current.get('player_id') == self.player_id and not better_result(value, current):
                     return current
                 return value
@@ -784,7 +776,7 @@ class StudioRanking(object):
             return False
 
     def read(self, mode):
-        if not self.enabled:
+        if not self.is_enabled():
             return dict(ok=False, entries=[], message='Studio ranking is off.')
         try:
             folder = self._directory(mode)
@@ -795,7 +787,9 @@ class StudioRanking(object):
                 return dict(ok=True, entries=[], message='NO SCORES YET')
             entries = []
             for name in os.listdir(folder)[:5000]:
-                if not re.match(r'^[a-f0-9]{32}\.json$', name):
+                if not self.is_enabled():
+                    return dict(ok=False, entries=[], message='Studio ranking is off.')
+                if not re.match(r'^[a-f0-9]{32}\.json\Z', name):
                     continue
                 path = os.path.join(folder, name)
                 if os.path.islink(path):
@@ -832,11 +826,11 @@ class GlobalRankingClient(object):
         if not self.enabled:
             callback(dict(ok=False, error='Global ranking is off.'))
             return
-        if not re.match(r'^https://[A-Za-z0-9.-]+(?::[0-9]+)?$', self.endpoint):
+        if not re.match(r'^https://[A-Za-z0-9.-]+(?::[0-9]+)?\Z', self.endpoint):
             callback(dict(ok=False, error='The official Global endpoint is not configured.'))
             return
         token = self.settings.read()['player_token'] if authenticated else ''
-        if authenticated and not re.match(r'^[a-f0-9]{64}$', token):
+        if authenticated and not re.match(r'^[a-f0-9]{64}\Z', token):
             callback(dict(ok=False, error='Create an online profile first.'))
             return
         generation = self.generation
@@ -856,8 +850,8 @@ class GlobalRankingClient(object):
             return
         def done(r):
             if r.get('ok'):
-                if not (isinstance(r.get('player_id'), type(u'')) and re.match(r'^[a-f0-9-]{36}$',r['player_id']) and
-                        isinstance(r.get('player_token'), type(u'')) and re.match(r'^[a-f0-9]{64}$',r['player_token'])):
+                if not (isinstance(r.get('player_id'), type(u'')) and re.match(r'^[a-f0-9-]{36}\Z',r['player_id']) and
+                        isinstance(r.get('player_token'), type(u'')) and re.match(r'^[a-f0-9]{64}\Z',r['player_token'])):
                     r = dict(ok=False,error='Invalid profile response.')
                 elif not self.settings.save_preferences(dict(player_id=r['player_id'],player_token=r['player_token'])):
                     r = dict(ok=False,error='Online identity could not be saved. Check local settings permissions.')
@@ -870,8 +864,8 @@ class GlobalRankingClient(object):
     def start_run(self, mode, callback):
         def done(r):
             if r.get('ok') and not (isinstance(r.get('run_token'),type(u'')) and
-                    re.match(r'^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$',r['run_token']) and len(r['run_token'])<=2048 and
-                    isinstance(r.get('seed'),type(u'')) and re.match(r'^[a-f0-9]{16}$',r['seed'])):
+                    re.match(r'^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\Z',r['run_token']) and len(r['run_token'])<=2048 and
+                    isinstance(r.get('seed'),type(u'')) and re.match(r'^[a-f0-9]{16}\Z',r['seed'])):
                 r = dict(ok=False,error='Invalid start response.')
             callback(r)
         self.request('POST','/v1/runs',dict(mode=mode,ruleset=RULESET,version=__version__),done)
@@ -1127,6 +1121,8 @@ class SettingsDialog(QtWidgets.QDialog):
             self.message.setText(self.panel.settings.last_error)
             return
         self.panel.preferences = self.panel.settings.read()
+        self.panel._studio_cancel.set()
+        self.panel._studio_cancel = threading.Event()
         self.panel._grid_checkbox.setChecked(values['grid'])
         if hasattr(self.panel, 'network'):
             self.panel.network.configure(values['global_enabled'])
@@ -1246,6 +1242,7 @@ class NukerisPanel(QtWidgets.QWidget):
         self._starting_online = False
         self._start_serial = 0
         self.result_status = ''
+        self._studio_cancel = threading.Event()
         self.session = None
         self.engine = GameEngine(storage=self.settings)
         self.started = False
@@ -1673,7 +1670,7 @@ class NukerisPanel(QtWidgets.QWidget):
 
     def _studio_store(self):
         p = self.preferences
-        return StudioRanking(p['studio_enabled'], p['studio_folder'], p['studio_player_id'], p['profile'])
+        return StudioRanking(p['studio_enabled'], p['studio_folder'], p['studio_player_id'], p['profile'], self._studio_cancel.is_set)
 
     def _show_ranking(self):
         self._set_paused(True, release_input=True)

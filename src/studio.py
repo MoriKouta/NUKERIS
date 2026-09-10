@@ -1,13 +1,17 @@
 class StudioRanking(object):
     """Trust-based PB files. Disabled operations do not inspect the filesystem."""
-    def __init__(self, enabled=False, folder='', player_id='', profile=None):
+    def __init__(self, enabled=False, folder='', player_id='', profile=None, cancelled=None):
         self.enabled = enabled
         self.folder = folder
         self.player_id = player_id
         self.profile = profile or {}
+        self.cancelled = cancelled or (lambda: False)
+
+    def is_enabled(self):
+        return self.enabled and not self.cancelled()
 
     def _directory(self, mode):
-        if not self.enabled or mode not in (SCORE_ATTACK, SPRINT) or not self.folder:
+        if not self.is_enabled() or mode not in (SCORE_ATTACK, SPRINT) or not self.folder:
             raise ValueError('Studio ranking is disabled or not configured')
         root = os.path.realpath(os.path.abspath(self.folder))
         path = os.path.join(root, 'scores', mode, RULESET)
@@ -17,9 +21,9 @@ class StudioRanking(object):
         return path
 
     def publish(self, result):
-        if not self.enabled:
+        if not self.is_enabled():
             return False
-        if not valid_result(result) or not re.match(r'^[a-f0-9]{32}$', self.player_id) or not validate_profile(self.profile):
+        if not valid_result(result) or not re.match(r'^[a-f0-9]{32}\Z', self.player_id) or not validate_profile(self.profile):
             return False
         try:
             if not os.path.isdir(self.folder):
@@ -31,6 +35,8 @@ class StudioRanking(object):
             value = dict(result, schema=1, player_id=self.player_id,
                          nickname=self.profile['nickname'], country=self.profile['country'], region=self.profile['region'])
             def merge(current):
+                if not self.is_enabled():
+                    raise IOError('Studio operation cancelled')
                 if valid_result(current) and current.get('player_id') == self.player_id and not better_result(value, current):
                     return current
                 return value
@@ -39,7 +45,7 @@ class StudioRanking(object):
             return False
 
     def read(self, mode):
-        if not self.enabled:
+        if not self.is_enabled():
             return dict(ok=False, entries=[], message='Studio ranking is off.')
         try:
             folder = self._directory(mode)
@@ -50,7 +56,9 @@ class StudioRanking(object):
                 return dict(ok=True, entries=[], message='NO SCORES YET')
             entries = []
             for name in os.listdir(folder)[:5000]:
-                if not re.match(r'^[a-f0-9]{32}\.json$', name):
+                if not self.is_enabled():
+                    return dict(ok=False, entries=[], message='Studio ranking is off.')
+                if not re.match(r'^[a-f0-9]{32}\.json\Z', name):
                     continue
                 path = os.path.join(folder, name)
                 if os.path.islink(path):

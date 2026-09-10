@@ -1,10 +1,8 @@
-name: Compatibility syntax checks
+name: Compatibility and regression tests
 
 on:
   push:
-    branches:
-      - main
-      - "compat/**"
+    branches: [main, "compat/**", "ai/**", "codex/**"]
   pull_request:
   workflow_dispatch:
 
@@ -12,27 +10,49 @@ permissions:
   contents: read
 
 jobs:
-  python3-syntax:
-    runs-on: ubuntu-latest
+  python:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+        python: ["3.11", "3.12"]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-      - name: Compile release and dev builds with Python 3
-        shell: bash
-        run: |
-          for file in nukeris.py nukeris_dev_*.py; do
-            [ -e "$file" ] || continue
-            echo "Checking $file"
-            python -m py_compile "$file"
-          done
-
-  python2-syntax:
-    runs-on: ubuntu-latest
+          python-version: ${{ matrix.python }}
+      - run: python tools/build.py --check
+      - run: python -m py_compile nukeris.py
+      - run: python -m unittest discover -s tests -v
+  python2:
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-      - name: Compile release and dev builds with Python 2.7
-        run: >-
-          docker run --rm -v "$PWD:/work" -w /work python:2.7
-          sh -lc 'for file in nukeris.py nukeris_dev_*.py; do [ -e "$file" ] || continue; echo "Checking $file"; python -m py_compile "$file" || exit 1; done'
+      - name: Python 2.7 syntax and pure Python tests
+        run: docker run --rm -v "$PWD:/work" -w /work python:2.7.18 sh -c 'python -m py_compile nukeris.py && python tools/build.py --check && python -m unittest discover -s tests -v'
+  qt:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+        binding: [PySide2, PySide6]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+      - if: matrix.binding == 'PySide2'
+        run: python -m pip install PySide2==5.15.2.1
+      - if: matrix.binding == 'PySide6'
+        run: python -m pip install PySide6==6.5.3
+      - run: python tests/run_qt.py
+  backend:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: node --test backend/test/worker.test.mjs

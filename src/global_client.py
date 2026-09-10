@@ -21,11 +21,11 @@ class GlobalRankingClient(object):
         if not self.enabled:
             callback(dict(ok=False, error='Global ranking is off.'))
             return
-        if not re.match(r'^https://[A-Za-z0-9.-]+(?::[0-9]+)?$', self.endpoint):
+        if not re.match(r'^https://[A-Za-z0-9.-]+(?::[0-9]+)?\Z', self.endpoint):
             callback(dict(ok=False, error='The official Global endpoint is not configured.'))
             return
         token = self.settings.read()['player_token'] if authenticated else ''
-        if authenticated and not re.match(r'^[a-f0-9]{64}$', token):
+        if authenticated and not re.match(r'^[a-f0-9]{64}\Z', token):
             callback(dict(ok=False, error='Create an online profile first.'))
             return
         generation = self.generation
@@ -45,8 +45,8 @@ class GlobalRankingClient(object):
             return
         def done(r):
             if r.get('ok'):
-                if not (isinstance(r.get('player_id'), type(u'')) and re.match(r'^[a-f0-9-]{36}$',r['player_id']) and
-                        isinstance(r.get('player_token'), type(u'')) and re.match(r'^[a-f0-9]{64}$',r['player_token'])):
+                if not (isinstance(r.get('player_id'), type(u'')) and re.match(r'^[a-f0-9-]{36}\Z',r['player_id']) and
+                        isinstance(r.get('player_token'), type(u'')) and re.match(r'^[a-f0-9]{64}\Z',r['player_token'])):
                     r = dict(ok=False,error='Invalid profile response.')
                 elif not self.settings.save_preferences(dict(player_id=r['player_id'],player_token=r['player_token'])):
                     r = dict(ok=False,error='Online identity could not be saved. Check local settings permissions.')
@@ -59,8 +59,8 @@ class GlobalRankingClient(object):
     def start_run(self, mode, callback):
         def done(r):
             if r.get('ok') and not (isinstance(r.get('run_token'),type(u'')) and
-                    re.match(r'^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$',r['run_token']) and len(r['run_token'])<=2048 and
-                    isinstance(r.get('seed'),type(u'')) and re.match(r'^[a-f0-9]{16}$',r['seed'])):
+                    re.match(r'^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\Z',r['run_token']) and len(r['run_token'])<=2048 and
+                    isinstance(r.get('seed'),type(u'')) and re.match(r'^[a-f0-9]{16}\Z',r['seed'])):
                 r = dict(ok=False,error='Invalid start response.')
             callback(r)
         self.request('POST','/v1/runs',dict(mode=mode,ruleset=RULESET,version=__version__),done)
