@@ -5,7 +5,7 @@ import os
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PARTS = ['core.py', 'ui.py']
+PARTS = ['core.py', 'geometry.py', 'ui.py']
 
 def build(include_ui=True):
     parts = []

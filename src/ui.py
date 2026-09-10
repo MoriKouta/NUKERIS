@@ -70,7 +70,7 @@ class NukerisPanel(QtWidgets.QWidget):
         self.setObjectName("NukerisPanel")
         self.setFocusPolicy(QC.StrongFocus)
         self.setMouseTracking(True)
-        self.setMinimumSize(360, 520)
+        self.setMinimumSize(360, 600)
 
         self.engine = GameEngine()
         self.started = False
@@ -201,24 +201,14 @@ class NukerisPanel(QtWidgets.QWidget):
 
     def resizeEvent(self, event) :
         w = float(self.width())
-        h = float(self.height())
-        margin = max(10.0, min(20.0, w * 0.026))
-        header_h = 48.0
-        footer_h = 178.0
-        content_top = header_h + 16.0
-        side = 132.0 if w >= 650 else (94.0 if w >= 500 else 0.0)
-        gutter = 12.0 if side else 0.0
-
-        board_avail_w = w - (2 * margin) - (2 * side) - (2 * gutter)
-        board_avail_h = h - content_top - footer_h - margin
-        cell = math.floor(min(board_avail_w / BOARD_W, board_avail_h / BOARD_H))
-        cell = max(12.0, float(cell))
-        board_h = cell * BOARD_H
-        board_bottom = content_top + board_h
+        layout = panel_layout(w, float(self.height()))
+        margin = layout['margin']
+        bx, by, board_w, board_h = layout['board']
+        board_bottom = by + board_h
 
         # GAME follows the board instead of being pinned to the bottom of a tall pane.
         # This removes large dead zones while keeping all real widgets inside the viewport.
-        game_y = board_bottom + 16.0
+        game_y = board_bottom + (28.0 if layout["compact"] else 16.0)
         button_y = game_y + 21.0
         button_w = min(132.0, max(92.0, w - 2.0 * margin))
         button_x = margin
@@ -357,6 +347,9 @@ class NukerisPanel(QtWidgets.QWidget):
 
     def keyPressEvent(self, event) :
         try:
+            if not self.hasFocus() or event.modifiers() & (QC.ControlModifier | QC.AltModifier | QC.MetaModifier):
+                event.ignore()
+                return
             key = event.key()
 
             if key == QC.Key_Escape:
@@ -483,25 +476,9 @@ class NukerisPanel(QtWidgets.QWidget):
 
             w = float(self.width())
             h = float(self.height())
-            margin = max(10.0, min(20.0, w * 0.026))
-            header_h = 48.0
-            footer_h = 178.0
-            content_top = header_h + 16.0
-            side = 132.0 if w >= 650 else (94.0 if w >= 500 else 0.0)
-            gutter = 12.0 if side else 0.0
-
-            board_avail_w = w - (2 * margin) - (2 * side) - (2 * gutter)
-            board_avail_h = h - content_top - footer_h - margin
-            cell = math.floor(min(board_avail_w / BOARD_W, board_avail_h / BOARD_H))
-            cell = max(12.0, float(cell))
-
-            board_w = cell * BOARD_W
-            board_h = cell * BOARD_H
-            bx = (w - board_w) / 2.0
-            # Keep the playfield close to the title instead of vertically centering it
-            # inside unused space when the pane is tall.
-            by = content_top
-            board_rect = QtCore.QRectF(bx, by, board_w, board_h)
+            layout = panel_layout(w, h)
+            margin, side, gutter, cell = (layout[k] for k in ('margin','side','gutter','cell'))
+            board_rect = QtCore.QRectF(*layout['board'])
 
             self._draw_header(p, margin, w, t)
             self._draw_board(p, board_rect, cell, t)
@@ -509,6 +486,7 @@ class NukerisPanel(QtWidgets.QWidget):
             if side > 0:
                 self._draw_side_panels(p, board_rect, side, gutter, t)
             else:
+                self._draw_compact_previews(p, margin, w, board_rect, t)
                 self._draw_compact_stats(p, margin, w, board_rect, t)
 
             self._draw_footer(p, margin, w, h, board_rect, t)
@@ -732,42 +710,43 @@ class NukerisPanel(QtWidgets.QWidget):
                    source, target,
                    t, active = False,
                    ghost = False, subtle = False) :
-        sr = self._node_rect(board_rect, cell, source[0], source[1])
-        tr = self._node_rect(board_rect, cell, target[0], target[1])
-        start = QtCore.QPointF(sr.center().x(), sr.bottom() + 0.6)
-        end = QtCore.QPointF(tr.center().x(), tr.top() - 0.6)
+        self._draw_nuke_wire(p, board_rect, cell, source, target, t, active, ghost, subtle)
 
-        wire = QtGui.QColor(t["wire"])
-        if active:
-            wire = self._mix(wire, t["text"], 0.12)
-        if subtle:
-            wire.setAlpha(76)
+    def _draw_nuke_wire(self, p, board_rect, cell, source, target, t,
+                        active=False, ghost=False, subtle=False):
+        endpoints = wire_endpoints(source, target, cell, (board_rect.left(), board_rect.top()))
+        if endpoints is None:
+            return
+        start, end = (QtCore.QPointF(*pt) for pt in endpoints)
+        color = QtGui.QColor(t['wire'])
         if ghost:
-            wire = self._mix(t["faint"], t["board"], 0.30)
-            wire.setAlpha(92)
-
-        pen = QtGui.QPen(wire, max(1.0, cell * (0.048 if active else 0.040)))
+            color = QtGui.QColor(t['faint'])
+            color.setAlpha(70)
+        elif subtle:
+            color.setAlpha(75)
+        pen = QtGui.QPen(color, 1.1 if active else 1.0)
         if ghost:
             pen.setStyle(QC.DashLine)
         p.setPen(pen)
         p.setBrush(QC.NoBrush)
         p.drawLine(start, end)
+        self._draw_nuke_arrow(p, start, end, color, cell)
 
-        # Small arrow head near the receiving node, matching Nuke's directional wires.
-        dx = end.x() - start.x()
-        dy = end.y() - start.y()
-        length = max(0.001, math.hypot(dx, dy))
-        ux, uy = dx / length, dy / length
-        px, py = -uy, ux
-        arrow_len = max(2.2, cell * 0.13)
-        arrow_w = max(1.4, cell * 0.075)
-        tip = QtCore.QPointF(end.x() - ux * 1.2, end.y() - uy * 1.2)
-        base = QtCore.QPointF(tip.x() - ux * arrow_len, tip.y() - uy * arrow_len)
-        a = QtCore.QPointF(base.x() + px * arrow_w, base.y() + py * arrow_w)
-        b = QtCore.QPointF(base.x() - px * arrow_w, base.y() - py * arrow_w)
+    def _draw_nuke_arrow(self, p, start, end, color, cell):
+        dx, dy = end.x()-start.x(), end.y()-start.y()
+        length = math.hypot(dx, dy)
+        if length < 1.0:
+            return
+        ux, uy = dx/length, dy/length
+        size = min(max(2.0, cell*.12), length*.65)
+        tip = QtCore.QPointF(end.x()-ux*.4, end.y()-uy*.4)
+        base = QtCore.QPointF(tip.x()-ux*size, tip.y()-uy*size)
+        wing = size*.5
+        points = [tip, QtCore.QPointF(base.x()-uy*wing, base.y()+ux*wing),
+                  QtCore.QPointF(base.x()+uy*wing, base.y()-ux*wing)]
         p.setPen(QC.NoPen)
-        p.setBrush(wire)
-        p.drawPolygon(QtGui.QPolygonF([tip, a, b]))
+        p.setBrush(color)
+        p.drawPolygon(QtGui.QPolygonF(points))
 
     def _draw_locked_graph(self, p, board_rect, cell,
                            t) :
@@ -833,12 +812,12 @@ class NukerisPanel(QtWidgets.QWidget):
             return
 
         if active:
-            base = base.lighter(112)
+            base = base.lighter(106)
 
         grad = QtGui.QLinearGradient(r.topLeft(), r.bottomLeft())
-        grad.setColorAt(0.0, base.lighter(116))
+        grad.setColorAt(0.0, base.lighter(105))
         grad.setColorAt(0.36, base)
-        grad.setColorAt(1.0, base.darker(116))
+        grad.setColorAt(1.0, base.darker(106))
         p.setBrush(grad)
         border = QtGui.QColor("#141414")
         if active:
@@ -848,7 +827,7 @@ class NukerisPanel(QtWidgets.QWidget):
 
         # Thin top highlight and bottom shadow are closer to the flat/gradient Nuke nodes
         # than the previous game-like header strip.
-        top_line = QtGui.QColor(base.lighter(136))
+        top_line = QtGui.QColor(base.lighter(112))
         top_line.setAlpha(145)
         p.setPen(QtGui.QPen(top_line, 1.0))
         p.drawLine(QtCore.QPointF(r.left() + 1, r.top() + 1), QtCore.QPointF(r.right() - 1, r.top() + 1))
@@ -859,7 +838,7 @@ class NukerisPanel(QtWidgets.QWidget):
         port = QtGui.QColor("#0D0D0D")
         p.setPen(QC.NoPen)
         p.setBrush(port)
-        port_r = max(1.0, min(2.2, cell * 0.060))
+        port_r = max(0.8, min(1.4, cell * 0.045))
         p.drawEllipse(QtCore.QPointF(r.center().x(), r.top() - 0.2), port_r, port_r)
         p.drawEllipse(QtCore.QPointF(r.center().x(), r.bottom() + 0.2), port_r, port_r)
 
@@ -1103,10 +1082,19 @@ class NukerisPanel(QtWidgets.QWidget):
             )
             y += item_h + 3.0
 
+    def _draw_compact_previews(self, p, margin, width, board, t):
+        p.setFont(self._font(10, QC.FontMedium))
+        p.setPen(t['muted'])
+        p.drawText(QtCore.QRectF(margin, 90, 80, 16), QC.AlignLeft, 'HOLD')
+        p.drawText(QtCore.QRectF(width-192, 90, 180, 16), QC.AlignLeft, 'NEXT')
+        self._draw_piece_preview(p, self.engine.hold_kind, margin, 107, 88, 48, t)
+        for i, kind in enumerate(self.engine.next_pieces(3)):
+            self._draw_piece_preview(p, kind, width-192+i*60, 107, 56, 48, t, False)
+
     def _draw_compact_stats(self, p, margin, width,
                             board, t) :
         # Narrow-pane fallback. Keep LINES immediately followed by TIME in reading order.
-        y = max(margin + 35, board.top() - 24)
+        y = board.bottom() + 2
         p.setFont(self._font(13, QC.FontMedium))
         p.setPen(t["text"])
         text = (
@@ -1202,7 +1190,7 @@ class NukerisPanel(QtWidgets.QWidget):
 
     def _draw_footer(self, p, margin, width, height,
                      board, t) :
-        game_y = board.bottom() + 16.0
+        game_y = board.bottom() + (28.0 if width < 650 else 16.0)
         controls_y = game_y + 94.0
 
         self._draw_section_header(
