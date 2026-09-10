@@ -359,5 +359,3 @@ class GameEngine(object):
                 self.score += 50 * self.combo * self.level
         else:
             self.combo = -1
-
-
