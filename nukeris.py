@@ -730,6 +730,74 @@ class SettingsStore(JsonStore):
                 results[key] = value
         return results
 
+COUNTRY_CODES = 'AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW'.split()
+
+class StudioRanking(object):
+    """Trust-based PB files. Disabled operations do not inspect the filesystem."""
+    def __init__(self, enabled=False, folder='', player_id='', profile=None):
+        self.enabled = enabled
+        self.folder = folder
+        self.player_id = player_id
+        self.profile = profile or {}
+
+    def _directory(self, mode):
+        if not self.enabled or mode not in (SCORE_ATTACK, SPRINT) or not self.folder:
+            raise ValueError('Studio ranking is disabled or not configured')
+        root = os.path.realpath(os.path.abspath(self.folder))
+        path = os.path.join(root, 'scores', mode, RULESET)
+        resolved = os.path.realpath(path)
+        if not os.path.normcase(resolved).startswith(os.path.normcase(root + os.sep)):
+            raise ValueError('Studio path escapes the configured folder')
+        return path
+
+    def publish(self, result):
+        if not self.enabled:
+            return False
+        if not valid_result(result) or not re.match(r'^[a-f0-9]{32}$', self.player_id) or not validate_profile(self.profile):
+            return False
+        try:
+            if not os.path.isdir(self.folder):
+                return False
+            folder = self._directory(result['mode'])
+            path = os.path.join(folder, self.player_id + '.json')
+            if os.path.islink(path) or os.path.islink(path + '.lockfile'):
+                return False
+            value = dict(result, schema=1, player_id=self.player_id,
+                         nickname=self.profile['nickname'], country=self.profile['country'], region=self.profile['region'])
+            def merge(current):
+                if valid_result(current) and current.get('player_id') == self.player_id and not better_result(value, current):
+                    return current
+                return value
+            return JsonStore(path).update(merge) is not None
+        except Exception:
+            return False
+
+    def read(self, mode):
+        if not self.enabled:
+            return dict(ok=False, entries=[], message='Studio ranking is off.')
+        try:
+            folder = self._directory(mode)
+            if not os.path.isdir(folder):
+                # Distinguish an empty score folder from a disconnected configured root.
+                if not os.path.isdir(self.folder):
+                    raise IOError('unavailable')
+                return dict(ok=True, entries=[], message='NO SCORES YET')
+            entries = []
+            for name in os.listdir(folder)[:5000]:
+                if not re.match(r'^[a-f0-9]{32}\.json$', name):
+                    continue
+                path = os.path.join(folder, name)
+                if os.path.islink(path):
+                    continue
+                value = read_json(path, {}, 8192)
+                if (value.get('schema') == 1 and value.get('mode') == mode and valid_result(value) and
+                        value.get('player_id') == name[:-5] and validate_profile(value)):
+                    entries.append(value)
+            entries.sort(key=lambda r: ((r['time_ms'] if mode == SPRINT else -r['score']), r['player_id']))
+            return dict(ok=True, entries=entries, message='' if entries else 'NO SCORES YET')
+        except Exception:
+            return dict(ok=False, entries=[], message='Studio folder is unavailable. Personal records are safe.')
+
 try:
     from PySide6 import QtCore, QtGui, QtWidgets
     QT_BINDING = "PySide6"
@@ -794,6 +862,171 @@ QC.FontDemiBold = _enum_value(QtGui.QFont, "Weight", "DemiBold")
 QC.Antialiasing = _enum_value(QtGui.QPainter, "RenderHint", "Antialiasing")
 
 
+import threading
+_RANKING_WORKERS = set()
+
+class RankingIO(QtCore.QObject):
+    delivered = QtCore.Signal(object)
+    finished = QtCore.Signal()
+    def __init__(self, operation):
+        QtCore.QObject.__init__(self)
+        self.operation = operation
+    def start(self):
+        thread = threading.Thread(target=self.run, name='NUKERIS Studio request')
+        thread.daemon = True
+        thread.start()
+    def run(self):
+        try:
+            try:
+                value = self.operation()
+            except Exception:
+                value = dict(ok=False, entries=[], message='Ranking is unavailable. Personal records are safe.')
+            try:
+                self.delivered.emit(value)
+                self.finished.emit()
+            except RuntimeError:
+                pass  # The host may have closed while the filesystem was unavailable.
+        finally:
+            _RANKING_WORKERS.discard(self)
+
+
+def run_ranking_io(operation, receiver=None):
+    if len(_RANKING_WORKERS) >= 2:
+        if receiver:
+            receiver(dict(ok=False, entries=[], message='A Studio operation is still pending. Personal records are safe.'))
+        return None
+    worker = RankingIO(operation)
+    _RANKING_WORKERS.add(worker)
+    if receiver is not None:
+        worker.delivered.connect(receiver)
+    worker.finished.connect(worker.deleteLater)
+    worker.start()
+    return worker
+
+
+class SettingsDialog(QtWidgets.QDialog):
+    def __init__(self, panel):
+        QtWidgets.QDialog.__init__(self, panel)
+        self.panel = panel
+        self.setWindowTitle('NUKERIS SETTINGS')
+        form = QtWidgets.QFormLayout(self)
+        self.grid = QtWidgets.QCheckBox('Node Graph grid')
+        self.grid.setChecked(panel.preferences['grid'])
+        self.studio = QtWidgets.QCheckBox('Enable Studio shared-folder ranking')
+        self.studio.setChecked(panel.preferences['studio_enabled'])
+        self.folder = QtWidgets.QLineEdit(panel.preferences['studio_folder'])
+        self.online = QtWidgets.QCheckBox('Enable Global online ranking (HTTPS)')
+        self.online.setChecked(panel.preferences['global_enabled'])
+        profile = panel.preferences['profile']
+        self.nickname = QtWidgets.QLineEdit(profile.get('nickname',''))
+        self.nickname.setMaxLength(16)
+        self.country = QtWidgets.QComboBox()
+        self.country.addItems([''] + COUNTRY_CODES)
+        self.country.setCurrentIndex(max(0,self.country.findText(profile.get('country',''))))
+        self.region = QtWidgets.QLineEdit(profile.get('region',''))
+        self.region.setMaxLength(32)
+        note = QtWidgets.QLabel('Ranking shares your nickname, manually selected area and result.\n'
+                                'No email, account, location lookup or Nuke project data.\n'
+                                'Studio uses only the folder you enter and existing OS permissions.\n'
+                                'Turning Global on alone sends no request. Use ranking actions to connect.')
+        note.setWordWrap(True)
+        form.addRow(note)
+        form.addRow(self.grid)
+        form.addRow(self.studio)
+        form.addRow('Studio folder',self.folder)
+        form.addRow(self.online)
+        form.addRow('Public nickname',self.nickname)
+        form.addRow('Country (manual)',self.country)
+        form.addRow('Region / Prefecture (manual)',self.region)
+        self.message = QtWidgets.QLabel('Nickname: 2-16 letters, numbers, _, - or .')
+        self.message.setWordWrap(True)
+        form.addRow(self.message)
+        save = QtWidgets.QPushButton('SAVE')
+        save.clicked.connect(self.save)
+        form.addRow(save)
+
+    def save(self):
+        profile = dict(nickname=self.nickname.text().strip(),country=self.country.currentText(),
+                       region=self.region.text().strip().upper())
+        if (self.studio.isChecked() or self.online.isChecked()) and not validate_profile(profile):
+            self.message.setText('Enter a valid nickname, country and region (A-Z, 0-9, space, _, - or .).')
+            return
+        folder = self.folder.text().strip()
+        if self.studio.isChecked() and not os.path.isabs(folder):
+            self.message.setText('Enter the absolute Studio folder path.')
+            return
+        values = dict(grid=self.grid.isChecked(), studio_enabled=self.studio.isChecked(),
+                      global_enabled=self.online.isChecked(), studio_folder=folder, profile=profile)
+        if self.studio.isChecked() and not self.panel.preferences['studio_player_id']:
+            values['studio_player_id'] = uuid.uuid4().hex
+        if not self.panel.settings.save_preferences(values):
+            self.message.setText(self.panel.settings.last_error)
+            return
+        self.panel.preferences = self.panel.settings.read()
+        self.panel._grid_checkbox.setChecked(values['grid'])
+        if hasattr(self.panel, 'network'):
+            self.panel.network.configure(values['global_enabled'])
+        self.accept()
+
+
+class RankingDialog(QtWidgets.QDialog):
+    def __init__(self, panel):
+        QtWidgets.QDialog.__init__(self, panel)
+        self.panel = panel
+        self.setWindowTitle('NUKERIS RANKING')
+        self.resize(620,480)
+        layout = QtWidgets.QVBoxLayout(self)
+        self.scope = QtWidgets.QComboBox()
+        self.scope.addItems(['PERSONAL','STUDIO','GLOBAL'])
+        self.mode = QtWidgets.QComboBox()
+        self.mode.addItems(MODE_LABELS[1:])
+        self.refresh = QtWidgets.QPushButton('REFRESH')
+        self.refresh.clicked.connect(self.load)
+        layout.addWidget(self.scope)
+        layout.addWidget(self.mode)
+        layout.addWidget(self.refresh)
+        self.table = QtWidgets.QTableWidget(0,4)
+        self.table.setHorizontalHeaderLabels(['#','PLAYER','AREA','RESULT'])
+        self.table.setEditTriggers(_enum_value(QtWidgets.QAbstractItemView,'EditTrigger','NoEditTriggers'))
+        self.table.horizontalHeader().setStretchLastSection(True)
+        layout.addWidget(self.table)
+        self.status = QtWidgets.QLabel()
+        self.status.setWordWrap(True)
+        layout.addWidget(self.status)
+        self.ranks = QtWidgets.QLabel()
+        layout.addWidget(self.ranks)
+        self.load()
+
+    def load(self):
+        mode = MODES[self.mode.currentIndex()+1]
+        scope = self.scope.currentIndex()
+        self.table.setRowCount(0)
+        self.ranks.setText('')
+        if scope == 0:
+            r = self.panel.settings.personal().get(mode+'/'+RULESET)
+            self.display(dict(ok=True,entries=[dict(r,nickname='YOU',country='',region='')] if r else []))
+            self.status.setText('NORMAL BEST  {0:,} | Personal records are fully offline.'.format(self.panel.settings.best()))
+        elif scope == 1:
+            self.refresh.setEnabled(False)
+            self.status.setText('Reading the configured Studio folder...')
+            store = self.panel._studio_store()
+            run_ranking_io(lambda: store.read(mode), self.display)
+        else:
+            self.status.setText('Global ranking is not configured yet. Personal records are safe.')
+
+    def display(self, response):
+        self.refresh.setEnabled(True)
+        entries = response.get('entries', [])
+        self.table.setRowCount(len(entries))
+        for i, row in enumerate(entries):
+            value = format_milliseconds(row['time_ms']) if row['mode']==SPRINT else '{0:,}'.format(row['score'])
+            for j, text in enumerate((str(i+1), row.get('nickname',''),
+                                      row.get('country','')+' / '+row.get('region',''), value)):
+                self.table.setItem(i,j,QtWidgets.QTableWidgetItem(text))
+        self.table.resizeColumnsToContents()
+        self.status.setText(response.get('message') or ('' if entries else 'NO SCORES YET\nSet the first record.'))
+
+
 class NukerisPanel(QtWidgets.QWidget):
     """Dockable Qt game widget. No Nuke script access is performed here."""
 
@@ -850,6 +1083,9 @@ class NukerisPanel(QtWidgets.QWidget):
         self._ranking_button = QtWidgets.QPushButton('RANKING', self)
         self._ranking_button.setFocusPolicy(QC.NoFocus)
         self._ranking_button.clicked.connect(self._show_ranking)
+        self._settings_button = QtWidgets.QPushButton('SETTINGS', self)
+        self._settings_button.setFocusPolicy(QC.NoFocus)
+        self._settings_button.clicked.connect(self._show_settings)
         self._apply_button_style()
 
     # ---------- Palette / Nuke look ----------
@@ -963,6 +1199,7 @@ class NukerisPanel(QtWidgets.QWidget):
             int(round(margin)), int(round(button_y + 35.0)), int(round(checkbox_w)), 24
         )
         self._ranking_button.setGeometry(int(margin+button_w+8), int(button_y), 100, 28)
+        self._settings_button.setGeometry(int(margin+button_w+114), int(button_y), 92, 28)
         self._mode_combo.setGeometry(12, 54, min(220, int(w)-140), 26)
         QtWidgets.QWidget.resizeEvent(self, event)
 
@@ -1186,16 +1423,25 @@ class NukerisPanel(QtWidgets.QWidget):
     def _record_result(self, result):
         if result and result['mode'] != NORMAL:
             self.settings.record(result)
+            if self.preferences['studio_enabled']:
+                store = self._studio_store()
+                run_ranking_io(lambda: store.publish(result))
+
+    def _studio_store(self):
+        p = self.preferences
+        return StudioRanking(p['studio_enabled'], p['studio_folder'], p['studio_player_id'], p['profile'])
 
     def _show_ranking(self):
         self._set_paused(True, release_input=True)
-        values = self.settings.personal()
-        lines = ['NORMAL BEST  {0:,}'.format(self.settings.best())]
-        for mode, label in zip(MODES[1:], MODE_LABELS[1:]):
-            r = values.get(mode + '/' + RULESET)
-            value = 'NO RECORD' if r is None else (format_milliseconds(r['time_ms']) if mode == SPRINT else '{0:,}'.format(r['score']))
-            lines.append(label + '  ' + value)
-        QtWidgets.QMessageBox.information(self, 'PERSONAL RANKING', '\n\n'.join(lines))
+        dialog = RankingDialog(self)
+        dialog.setAttribute(_enum_value(QtCore.Qt,'WidgetAttribute','WA_DeleteOnClose'), True)
+        dialog.show()
+
+    def _show_settings(self):
+        self._set_paused(True, release_input=True)
+        dialog = SettingsDialog(self)
+        dialog.setAttribute(_enum_value(QtCore.Qt,'WidgetAttribute','WA_DeleteOnClose'), True)
+        dialog.show()
 
     def _check_session(self):
         if self.session is None:

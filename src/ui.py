@@ -118,6 +118,9 @@ class NukerisPanel(QtWidgets.QWidget):
         self._ranking_button = QtWidgets.QPushButton('RANKING', self)
         self._ranking_button.setFocusPolicy(QC.NoFocus)
         self._ranking_button.clicked.connect(self._show_ranking)
+        self._settings_button = QtWidgets.QPushButton('SETTINGS', self)
+        self._settings_button.setFocusPolicy(QC.NoFocus)
+        self._settings_button.clicked.connect(self._show_settings)
         self._apply_button_style()
 
     # ---------- Palette / Nuke look ----------
@@ -231,6 +234,7 @@ class NukerisPanel(QtWidgets.QWidget):
             int(round(margin)), int(round(button_y + 35.0)), int(round(checkbox_w)), 24
         )
         self._ranking_button.setGeometry(int(margin+button_w+8), int(button_y), 100, 28)
+        self._settings_button.setGeometry(int(margin+button_w+114), int(button_y), 92, 28)
         self._mode_combo.setGeometry(12, 54, min(220, int(w)-140), 26)
         QtWidgets.QWidget.resizeEvent(self, event)
 
@@ -454,16 +458,25 @@ class NukerisPanel(QtWidgets.QWidget):
     def _record_result(self, result):
         if result and result['mode'] != NORMAL:
             self.settings.record(result)
+            if self.preferences['studio_enabled']:
+                store = self._studio_store()
+                run_ranking_io(lambda: store.publish(result))
+
+    def _studio_store(self):
+        p = self.preferences
+        return StudioRanking(p['studio_enabled'], p['studio_folder'], p['studio_player_id'], p['profile'])
 
     def _show_ranking(self):
         self._set_paused(True, release_input=True)
-        values = self.settings.personal()
-        lines = ['NORMAL BEST  {0:,}'.format(self.settings.best())]
-        for mode, label in zip(MODES[1:], MODE_LABELS[1:]):
-            r = values.get(mode + '/' + RULESET)
-            value = 'NO RECORD' if r is None else (format_milliseconds(r['time_ms']) if mode == SPRINT else '{0:,}'.format(r['score']))
-            lines.append(label + '  ' + value)
-        QtWidgets.QMessageBox.information(self, 'PERSONAL RANKING', '\n\n'.join(lines))
+        dialog = RankingDialog(self)
+        dialog.setAttribute(_enum_value(QtCore.Qt,'WidgetAttribute','WA_DeleteOnClose'), True)
+        dialog.show()
+
+    def _show_settings(self):
+        self._set_paused(True, release_input=True)
+        dialog = SettingsDialog(self)
+        dialog.setAttribute(_enum_value(QtCore.Qt,'WidgetAttribute','WA_DeleteOnClose'), True)
+        dialog.show()
 
     def _check_session(self):
         if self.session is None:
