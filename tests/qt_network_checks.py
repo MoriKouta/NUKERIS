@@ -52,5 +52,11 @@ def run(nukeris, app):
         assert len(responses)==1,responses
         assert (responses[0].get('ok') is True)==expected,responses
         assert not transport.pending
-        assert bytes(manager.requests[0].rawHeader('Authorization'))==b'Bearer '+b'a'*64
+        request=manager.requests[0]
+        try:
+            authorization=request.rawHeader(b'Authorization')
+        except TypeError:
+            # Newer Qt bindings expose the getter using a string view.
+            authorization=request.rawHeader('Authorization')
+        assert bytes(authorization)==b'Bearer '+b'a'*64
     print('Qt transport checks passed: success, malformed JSON, redirect, oversized response, timeout.')
