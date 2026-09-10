@@ -5,7 +5,7 @@
 - `python tools/build.py --check`: the single-file distribution matches all development sources.
 - `python -m unittest discover -s tests -v`: Qt/Nuke-free engine, storage, migration, timing, geometry, Studio, Global protocol and privacy regressions.
 - `node --test backend/test/worker.test.mjs`: Worker handler and SQL with an in-memory SQLite D1 adapter; not a live Cloudflare deployment.
-- `python tests/run_qt.py`: offscreen widget construction/paint/resize/dialogs, offline initialization and real Qt transport with fake replies (success, malformed JSON, redirects, oversized data, timeout).
+- `python tests/run_qt.py`: offscreen widget construction/paint/resize/dialogs, offline initialization, modified keys and Esc during an online start, stale start-reply rejection, and real Qt transport with fake replies (success, malformed JSON, redirects, oversized data, timeout).
 - `git diff --check`: patch whitespace validation.
 
 The Normal trace fixture was captured from v1.1.0 `f12d176` using an explicit fixed queue. It checks movement/rotation/drop/hold/top-out state and score parity rather than relying on the new implementation to invent its own expected values.
@@ -15,6 +15,20 @@ The Normal trace fixture was captured from v1.1.0 `f12d176` using an explicit fi
 Windows: Python 3.12.14, Node 24.19.0, isolated PySide6 6.8.3. Pure Python tests, backend tests and Qt smoke/transport checks pass. Standard/Compact and both dialogs were rendered offscreen and visually inspected. This is **not Nuke runtime verification**. No installed Nuke was launched and no user's comp/settings were used.
 
 Local Python 2.7 and PySide2 runtimes were unavailable. The Windows Python 2 replacement path was exercised using the fallback under Python 3, which is not the same as running Python 2.7. CI is configured for actual Python 2.7.18 on Linux, Python 3.11/3.12 on Windows/Linux, PySide2 5.15.2.1 and PySide6 6.5.3 on Windows/Linux, plus backend tests. Consult the PR checks for current outcomes; configuration alone is not success evidence.
+
+## CI evidence
+
+On 2026-09-10, [run 34478506090](https://github.com/MoriKouta/NUKERIS/actions/runs/34478506090) at `f1a6649` passed all ten jobs:
+
+| Environment | Executed checks | Result |
+| --- | --- | --- |
+| Linux container, Python 2.7.18 | Distribution syntax/build and 45 pure Python tests | PASS |
+| Ubuntu 22.04 / Windows runner, Python 3.11 and 3.12 | Distribution syntax/build and 45 pure Python tests per combination | PASS |
+| Ubuntu 22.04 / Windows runner, Python 3.9, PySide2 5.15.2.1 | Offscreen UI and Qt transport checks | PASS |
+| Ubuntu 22.04 / Windows runner, Python 3.9, PySide6 6.5.3 | Offscreen UI and Qt transport checks | PASS |
+| Ubuntu 22.04, Node 24 | 11 Worker/SQLite adapter tests | PASS |
+
+The first run failed because the test's header getter used a newer Qt signature and the Linux runner lacked EGL. Both CI/test issues were corrected. Later commits add the pending-start input regression above; consult [Draft PR #2 checks](https://github.com/MoriKouta/NUKERIS/pull/2/checks) for the current revision. These results do not certify Nuke's embedded Qt builds or Python 2.7 on Windows.
 
 ## Required manual Nuke checks
 

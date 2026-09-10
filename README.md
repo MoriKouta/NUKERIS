@@ -61,7 +61,7 @@ No supporting source folders or third-party Python packages need to be installed
 | Q / E, Up | Rotate |
 | C | Hold |
 | Space / W | Hard drop |
-| Esc | Pause and release input |
+| Esc | Pause and release input; cancel a pending Global start |
 | Space / Enter while ready or paused | Start / resume |
 | Mode selector + NEW GAME | Start selected mode |
 | RANKING / SETTINGS | Open local dialogs; gameplay pauses |

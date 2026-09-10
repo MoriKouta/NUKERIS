@@ -1561,19 +1561,28 @@ class NukerisPanel(QtWidgets.QWidget):
 
     def keyPressEvent(self, event) :
         try:
-            if self._starting_online:
-                event.accept()
-                return
             if not self.hasFocus() or event.modifiers() & (QC.ControlModifier | QC.AltModifier | QC.MetaModifier):
                 event.ignore()
                 return
             key = event.key()
 
             if key == QC.Key_Escape:
+                if self._starting_online:
+                    self._start_serial += 1
+                    self._starting_online = False
+                    self.result_status = 'Global start cancelled.'
+                    self.network.transport.cancel()
                 if self.started and not self.engine.game_over:
                     self._set_paused(True, release_input=True)
                 self.clearFocus()
                 event.accept()
+                return
+
+            if self._starting_online:
+                if key in self._GAME_KEYS:
+                    event.accept()
+                else:
+                    event.ignore()
                 return
 
             if self.error_text:

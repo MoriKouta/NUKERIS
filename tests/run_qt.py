@@ -49,6 +49,31 @@ try:
     assert panel.engine is engine
     panel._set_paused(True,True)
     assert not panel._timer.isActive()
+    # A pending online start must still leave Nuke's modified keys alone and
+    # release focus immediately on Esc. Its late reply must not start a game.
+    original_start_run = panel.network.start_run
+    replies = []
+    panel.network.start_run = lambda mode, callback: replies.append(callback)
+    panel.preferences['global_enabled'] = True
+    panel._mode_combo.setCurrentIndex(1)
+    panel.setFocus()
+    app.processEvents()
+    assert panel.hasFocus()
+    panel._new_game()
+    assert panel._starting_online
+    key_press = nukeris._enum_value(QtCore.QEvent, 'Type', 'KeyPress')
+    modified = QtGui.QKeyEvent(key_press, nukeris.QC.Key_S, nukeris.QC.ControlModifier)
+    panel.keyPressEvent(modified)
+    assert not modified.isAccepted()
+    no_modifier = nukeris._enum_value(QtCore.Qt, 'KeyboardModifier', 'NoModifier')
+    escaped = QtGui.QKeyEvent(key_press, nukeris.QC.Key_Escape, no_modifier)
+    panel.keyPressEvent(escaped)
+    assert not panel.hasFocus() and not panel.input_active
+    assert not panel._starting_online and not panel._timer.isActive()
+    replies[0](dict(ok=True, run_token='ignored', seed='a'*16))
+    assert panel.engine is engine
+    panel.network.start_run = original_start_run
+    panel.preferences['global_enabled'] = False
     for dialog_class in (nukeris.SettingsDialog,nukeris.RankingDialog):
         dialog=dialog_class(panel)
         dialog.show()
